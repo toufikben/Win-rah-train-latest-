@@ -1,0 +1,7 @@
+{
+  "name": "Win rah train 🚂",
+  "description": "تطبيق رادار وتتبع حركة قطارات الجزائر الحية ومنبه الوصول الذكي (SNTF)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
