@@ -13,12 +13,22 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  val versionCodeFromEnv = System.getenv("VERSION_CODE")?.toIntOrNull()
+  val versionNameFromEnv = System.getenv("VERSION_NAME")?.takeIf { it.isNotBlank() }
+  val releaseKeystorePath = System.getenv("KEYSTORE_PATH")
+    ?.takeIf { it.isNotBlank() }
+    ?: "${rootDir}/my-upload-key.jks"
+  val releaseKeystoreFile = file(releaseKeystorePath)
+  val releaseStorePassword = System.getenv("STORE_PASSWORD")
+  val releaseKeyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
+  val releaseKeyPassword = System.getenv("KEY_PASSWORD")
+
   defaultConfig {
     applicationId = "com.aistudio.trainradar.dzxyz"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = versionCodeFromEnv ?: 1
+    versionName = versionNameFromEnv ?: "1.0"
     buildConfigField("String", "GEMINI_API_KEY", "\"AIzaSyPlaceholder\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -26,11 +36,10 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storeFile = releaseKeystoreFile
+      storePassword = releaseStorePassword
+      keyAlias = releaseKeyAlias
+      keyPassword = releaseKeyPassword
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
