@@ -1,7 +1,11 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -25,8 +29,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DirectionsTransit
 import androidx.compose.material.icons.filled.Favorite
@@ -36,6 +43,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RailwayAlert
 import androidx.compose.material.icons.filled.Sensors
@@ -679,12 +687,14 @@ fun SettingsScreen(viewModel: TrainViewModel) {
                                     }
                                     try {
                                         context.startActivity(intent)
-                                    } catch (_: Exception) {}
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "www.toufik155@gmail.com", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             ) {
                                 Icon(
                                     Icons.Default.Share,
-                                    contentDescription = "إرسال رسالة",
+                                    contentDescription = "إرسال رسالة بريد",
                                     tint = Color(0xFF38BDF8),
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -692,6 +702,186 @@ fun SettingsScreen(viewModel: TrainViewModel) {
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
+                        Divider(color = Color(0xFF334155), thickness = 0.6.dp)
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // User Phone & WhatsApp Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Smartphone,
+                                contentDescription = "رقم الهاتف والواتساب",
+                                tint = Color(0xFF34D399),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "الهاتف النقال والواتساب:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFF065F46)
+                                    ) {
+                                        Text(
+                                            text = "WhatsApp 💬",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFD1FAE5),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "0541558675 (+213 541 55 86 75)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF34D399)
+                                )
+                            }
+
+                            // Copy Phone button
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText("Phone", "0541558675")
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "تم نسخ رقم الهاتف والواتساب: 0541558675", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "نسخ الرقم",
+                                    tint = Color(0xFF94A3B8),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Quick Contact Action Buttons (Call, WhatsApp, Email)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Direct Phone Call
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Intent.ACTION_DIAL).apply {
+                                        data = Uri.parse("tel:0541558675")
+                                    }
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Call,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "اتصال 📞",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            // Direct WhatsApp Chat
+                            Button(
+                                onClick = {
+                                    val url = "https://wa.me/213541558675"
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "WhatsApp: 0541558675", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "واتساب 💬",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Divider(color = Color(0xFF334155), thickness = 0.6.dp)
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Free App & No Ads Banner + Contribution Welcome
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF0F766E).copy(alpha = 0.2f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF14B8A6).copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(text = "🎁", fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "تطبيق مجاني 100% وخالٍ تماماً من الإعلانات",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF2DD4BF)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "صُمم هذا التطبيق حباً في خدمة مسافري وركاب السكك الحديدية بالجزائر، وهو متاح مجاناً للجميع بدون أي إعلانات مزعجة أو اشتراكات. نرحب بكل فكرة، مساعدة برمجية، أو مساهمة لتطوير المشروع وتحسين الخدمة لكافة مستعملي القطار.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFCCFBF1),
+                                    fontSize = 11.sp,
+                                    lineHeight = 17.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF0F766E)
+                                    ) {
+                                        Text(
+                                            text = "🤝 نرحب بأي مساهمة ومساعدة",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
                         Divider(color = Color(0xFF334155), thickness = 0.6.dp)
                         Spacer(modifier = Modifier.height(10.dp))
 
