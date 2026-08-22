@@ -80,7 +80,18 @@ jobs:
           set -euo pipefail
           signing_dir="${RUNNER_TEMP}/win-rah-signing"
           mkdir -p "$signing_dir"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$signing_dir/upload-key.jks"
+          encoded_keystore="$(printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]')"
+          encoded_length=${#encoded_keystore}
+          remainder=$((encoded_length % 4))
+          if [ "$remainder" -eq 1 ]; then
+            echo "KEYSTORE_BASE64 has an invalid length after whitespace removal." >&2
+            exit 1
+          elif [ "$remainder" -eq 2 ]; then
+            encoded_keystore="${encoded_keystore}=="
+          elif [ "$remainder" -eq 3 ]; then
+            encoded_keystore="${encoded_keystore}="
+          fi
+          printf '%s' "$encoded_keystore" | base64 --decode > "$signing_dir/upload-key.jks"
           keytool -list \
             -keystore "$signing_dir/upload-key.jks" \
             -storepass "$STORE_PASSWORD" \
