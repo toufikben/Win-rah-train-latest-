@@ -79,13 +79,4 @@ object GeoUtils {
         return minDistance
     }
 
-    /**
-     * Computes ETA in minutes based on distance in KM and live speed in KM/H
-     */
-    fun calculateEtaMinutes(distanceKm: Float, speedKmh: Float): Int {
-        val effectiveSpeed = if (speedKmh > 15f) speedKmh else 65.0f // Average suburban train speed when stopping/starting
-        val hours = distanceKm / effectiveSpeed
-        val minutes = (hours * 60).toInt()
-        return minutes.coerceAtLeast(1)
-    }
 }

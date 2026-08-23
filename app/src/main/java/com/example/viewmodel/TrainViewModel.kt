@@ -10,7 +10,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
+import com.example.data.LiveTrainRepository
 import com.example.data.TrainRepository
+import com.example.data.remote.dto.ObservationRequest
+import com.example.data.remote.dto.ReportRequest
 import com.example.location.LocationTracker
 import com.example.model.ActiveTrain
 import com.example.model.AlertSeverity
@@ -21,6 +24,7 @@ import com.example.model.DestinationAlarm
 import com.example.model.FavoriteStation
 import com.example.model.LineAlert
 import com.example.model.LiveGpsData
+import com.example.model.MonitorBinding
 import com.example.model.NearbyStationInfo
 import com.example.model.Station
 import com.example.model.StationInterchange
@@ -47,13 +51,24 @@ data class TrackPosition(
     val next: Station
 )
 
-class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
+class TrainViewModel private constructor(
+    private val app: Application,
+    private val enableLivePolling: Boolean,
+    private val liveTrainRepository: LiveTrainRepository
+) : AndroidViewModel(app) {
+    constructor(app: Application) : this(app, true, LiveTrainRepository())
+    constructor(app: Application, enableLivePolling: Boolean) : this(app, enableLivePolling, LiveTrainRepository())
 
     private val locationTracker = LocationTracker(app)
 
     val gpsData: StateFlow<LiveGpsData> = locationTracker.gpsData
     val isTrackingLocation: StateFlow<Boolean> = locationTracker.isTracking
-    val isTunnelSimulationMode: StateFlow<Boolean> = locationTracker.isTunnelSimulationMode
+
+    private val _isLiveDataLoading = MutableStateFlow(false)
+    val isLiveDataLoading: StateFlow<Boolean> = _isLiveDataLoading.asStateFlow()
+
+    private val _liveDataError = MutableStateFlow<String?>(null)
+    val liveDataError: StateFlow<String?> = _liveDataError.asStateFlow()
 
     private val _suburbs = MutableStateFlow(TrainRepository.suburbLines)
     val suburbs: StateFlow<List<SuburbLine>> = _suburbs.asStateFlow()
@@ -91,48 +106,15 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
     val destinationAlarm: StateFlow<DestinationAlarm> = _destinationAlarm.asStateFlow()
 
     // 2. CROWDSOURCED DELAY & CROWDING REPORTS
-    private val _crowdReportsMap = MutableStateFlow<Map<String, CrowdsourcedReport>>(
-        mapOf(
-            "tr_thnia_algiers_1" to CrowdsourcedReport(CrowdingLevel.MODERATE, DelayLevel.ON_TIME, 18, 1),
-            "tr_thnia_algiers_2" to CrowdsourcedReport(CrowdingLevel.LOW, DelayLevel.DELAY_5, 7, 3),
-            "tr_zeralda_algiers_1" to CrowdsourcedReport(CrowdingLevel.HIGH, DelayLevel.DELAY_5, 24, 2),
-            "tr_algiers_affroun_1" to CrowdsourcedReport(CrowdingLevel.MODERATE, DelayLevel.ON_TIME, 15, 4),
-            "tr_airport_algiers_1" to CrowdsourcedReport(CrowdingLevel.LOW, DelayLevel.ON_TIME, 9, 1),
-            "tr_thenia_tizi_1" to CrowdsourcedReport(CrowdingLevel.MODERATE, DelayLevel.DELAY_5, 11, 5)
-        )
-    )
+    private val _crowdReportsMap = MutableStateFlow<Map<String, CrowdsourcedReport>>(emptyMap())
     val crowdReportsMap: StateFlow<Map<String, CrowdsourcedReport>> = _crowdReportsMap.asStateFlow()
 
     // 3. FAVORITES AND QUICK WIDGETS
-    private val _favoriteStations = MutableStateFlow<List<FavoriteStation>>(
-        listOf(
-            FavoriteStation(
-                station = TrainRepository.suburbLines[0].stations[15], // الجزائر المركزية
-                suburbId = TrainRepository.suburbLines[0].id,
-                suburbName = TrainRepository.suburbLines[0].name,
-                tag = "العمل / العاصمة",
-                tagEmoji = "🏢"
-            ),
-            FavoriteStation(
-                station = TrainRepository.suburbLines[0].stations[2], // بومرداس
-                suburbId = TrainRepository.suburbLines[0].id,
-                suburbName = TrainRepository.suburbLines[0].name,
-                tag = "المنزل",
-                tagEmoji = "🏠"
-            ),
-            FavoriteStation(
-                station = TrainRepository.suburbLines[0].stations[9], // باب الزوار
-                suburbId = TrainRepository.suburbLines[0].id,
-                suburbName = TrainRepository.suburbLines[0].name,
-                tag = "الجامعة / USTHB",
-                tagEmoji = "🎓"
-            )
-        )
-    )
+    private val _favoriteStations = MutableStateFlow<List<FavoriteStation>>(emptyList())
     val favoriteStations: StateFlow<List<FavoriteStation>> = _favoriteStations.asStateFlow()
 
     // 5. LINE DISRUPTIONS & WEATHER ALERTS TICKER
-    private val _lineAlerts = MutableStateFlow<List<LineAlert>>(TrainRepository.initialLineAlerts)
+    private val _lineAlerts = MutableStateFlow<List<LineAlert>>(emptyList())
     val lineAlerts: StateFlow<List<LineAlert>> = _lineAlerts.asStateFlow()
 
     private val _selectedLineAlertModal = MutableStateFlow<LineAlert?>(null)
@@ -170,10 +152,10 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
     private var lastWhistleAlertTime = 0L
     private var lastAlarmRingTime = 0L
 
-    // Live continuous train track progression
-    private var trainProgressA = 0.28f
-    private var trainProgressB = 0.65f
-    private var trainUpdateJob: Job? = null
+    private var liveRefreshJob: Job? = null
+    private val _monitorBinding = MutableStateFlow<MonitorBinding?>(null)
+    val monitorBinding: StateFlow<MonitorBinding?> = _monitorBinding.asStateFlow()
+    private var lastObservationSentAt = 0L
 
     init {
         // Initialize Android notification channels
@@ -186,6 +168,7 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
                     updateNearbyStations(gps.latitude, gps.longitude)
                     if (_isOnboardMode.value) {
                         verifyPassengerLocation(gps)
+                        sendObservationIfEligible(gps)
                         if (_isBackgroundNotificationEnabled.value) {
                             val nextStName = _activeTrains.value.firstOrNull()?.nextStation?.name ?: "المحطة القادمة"
                             TrainNotificationHelper.showOngoingTripNotification(
@@ -201,8 +184,10 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
             }
         }
 
-        startRealTimeTrackEngine()
-        updateNearbyStations(36.7538, 3.0588) // Initialize with Algiers center coordinates
+        if (enableLivePolling) {
+            refreshLiveTrains()
+            startLiveRefresh()
+        }
     }
 
     fun selectSuburb(suburb: SuburbLine) {
@@ -226,26 +211,73 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
         recalculateActiveTrains()
     }
 
-    fun toggleTunnelSimulation(enable: Boolean) {
-        locationTracker.toggleTunnelSimulation(enable)
-        val msg = if (enable) "تم تفعيل محاكاة النفق: نظام القصور الذاتي (Dead-Reckoning) يعمل الآن 🚇" else "تمت استعادة إشارة GPS الطبيعية 🛰️"
-        _userFeedbackMessage.value = msg
-    }
-
     fun toggleOnboardMode(enable: Boolean): Boolean {
-        _isOnboardMode.value = enable
-        if (enable) {
-            val started = locationTracker.startLocationUpdates()
-            if (!started) {
-                _verificationStatus.value = VerificationStatus.WAITING_GPS
-            }
-            return started
-        } else {
+        if (!enable) {
+            val binding = _monitorBinding.value
+            _monitorBinding.value = null
             locationTracker.stopLocationUpdates()
             TrainNotificationHelper.clearOngoingNotification(app)
+            _isOnboardMode.value = false
             _verificationStatus.value = VerificationStatus.WAITING_GPS
+            if (binding != null) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    runCatching { liveTrainRepository.endMonitorSession(binding.sessionId) }
+                }
+            }
             return true
         }
+
+        if (!enableLivePolling) {
+            _userFeedbackMessage.value = "وضع الاختبار المحلي لا يشغّل البث الشبكي."
+            return false
+        }
+        val liveTrain = _activeTrains.value.firstOrNull {
+            !it.id.isBlank() && !it.tripId.isNullOrBlank()
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            var createdSessionId: String? = null
+            try {
+                val train = liveTrain ?: throw IllegalStateException("no_live_trackable_train")
+                val requestedTripId = train.tripId!!
+                val requestedTrainId = train.id
+                val session = liveTrainRepository.createMonitorSession(
+                    tripId = requestedTripId,
+                    trainId = requestedTrainId
+                )
+                createdSessionId = session.id
+                if (session.tripId != requestedTripId || session.trainId != requestedTrainId) {
+                    throw IllegalStateException("session_binding_mismatch")
+                }
+                if (!locationTracker.startLocationUpdates()) {
+                    throw IllegalStateException("location_unavailable")
+                }
+                _monitorBinding.value = MonitorBinding(
+                    sessionId = session.id,
+                    tripId = session.tripId,
+                    trainId = session.trainId
+                )
+                _isOnboardMode.value = true
+                _userFeedbackMessage.value = "تم بدء البث الحقيقي من جهازك بعد إنشاء جلسة المراقبة."
+            } catch (error: Exception) {
+                if (createdSessionId != null) {
+                    runCatching { liveTrainRepository.endMonitorSession(createdSessionId) }
+                }
+                _monitorBinding.value = null
+                _isOnboardMode.value = false
+                locationTracker.stopLocationUpdates()
+                _verificationStatus.value = VerificationStatus.WAITING_GPS
+                _userFeedbackMessage.value = if (error.message == "location_unavailable") {
+                    "تعذر بدء الموقع. تحقق من صلاحية GPS وإشارة الجهاز."
+                } else if (error.message == "no_live_trackable_train") {
+                    "لا يوجد قطار حي موثق يمكن بدء المراقبة عليه الآن."
+                } else if (error.message == "session_binding_mismatch") {
+                    "رفض الخادم جلسة لا تطابق القطار المطلوب؛ لم يبدأ البث."
+                } else {
+                    "تعذر إنشاء جلسة البث مع الخادم. حاول لاحقاً."
+                }
+            }
+        }
+        return true
     }
 
     fun refreshGpsLocation() {
@@ -347,33 +379,71 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
     // 2. CROWDSOURCED DELAY & CROWDING REPORTS
     // ==========================================
     fun submitCrowdingReport(trainId: String, crowding: CrowdingLevel) {
-        val current = _crowdReportsMap.value[trainId] ?: CrowdsourcedReport()
-        val updated = current.copy(
-            crowding = crowding,
-            reportCount = current.reportCount + 1,
-            lastUpdatedMinutesAgo = 0
+        submitEvidenceReport(
+            trainId = trainId,
+            reportType = "CROWDING",
+            description = "إفادة مستخدم: ${crowding.titleAr}"
         )
-        val map = _crowdReportsMap.value.toMutableMap()
-        map[trainId] = updated
-        _crowdReportsMap.value = map
-
-        recalculateActiveTrains()
-        _userFeedbackMessage.value = "شكراً لمشاركتك! تم تسجيل حالة الاكتظاظ (${crowding.titleAr}) لمساعدة بقية الركاب 👥"
     }
 
     fun submitDelayReport(trainId: String, delay: DelayLevel) {
-        val current = _crowdReportsMap.value[trainId] ?: CrowdsourcedReport()
-        val updated = current.copy(
-            delay = delay,
-            reportCount = current.reportCount + 1,
-            lastUpdatedMinutesAgo = 0
+        submitEvidenceReport(
+            trainId = trainId,
+            reportType = "DELAY",
+            description = "إفادة مستخدم: ${delay.titleAr}"
         )
-        val map = _crowdReportsMap.value.toMutableMap()
-        map[trainId] = updated
-        _crowdReportsMap.value = map
+    }
 
-        recalculateActiveTrains()
-        _userFeedbackMessage.value = "شكراً لك! تم تحديث تقرير التأخير (${delay.titleAr}) على الرادار ⏱️"
+    fun submitCrowdingReport(crowding: CrowdingLevel) {
+        submitBoundEvidenceReport(
+            reportType = "CROWDING",
+            description = "إفادة مستخدم: ${crowding.titleAr}"
+        )
+    }
+
+    fun submitDelayReport(delay: DelayLevel) {
+        submitBoundEvidenceReport(
+            reportType = "DELAY",
+            description = "إفادة مستخدم: ${delay.titleAr}"
+        )
+    }
+
+    private fun submitEvidenceReport(trainId: String, reportType: String, description: String) {
+        val tripId = _activeTrains.value.firstOrNull { it.id == trainId }?.tripId
+        submitEvidenceReport(trainId, tripId, reportType, description)
+    }
+
+    private fun submitBoundEvidenceReport(reportType: String, description: String) {
+        val binding = _monitorBinding.value
+        if (binding == null) {
+            _userFeedbackMessage.value = "ابدأ بثًا حيًا موثقًا قبل إرسال إفادة من وضع الراكب."
+            return
+        }
+        submitEvidenceReport(binding.trainId, binding.tripId, reportType, description)
+    }
+
+    private fun submitEvidenceReport(
+        trainId: String,
+        tripId: String?,
+        reportType: String,
+        description: String
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                liveTrainRepository.submitReport(
+                    ReportRequest(
+                        trainId = trainId,
+                        tripId = tripId,
+                        stationId = _selectedStation.value.id,
+                        reportType = reportType,
+                        description = description
+                    )
+                )
+                _userFeedbackMessage.value = "تم إرسال الإفادة إلى الخادم كبيان من مستخدمين، شكرًا لمساهمتك."
+            } catch (_: Exception) {
+                _userFeedbackMessage.value = "تعذر إرسال الإفادة الآن. تحقق من الاتصال وحاول مجددًا."
+            }
+        }
     }
 
     // ==========================================
@@ -540,163 +610,107 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
         } else {
             _verificationStatus.value = VerificationStatus.OUT_OF_CORRIDOR
         }
-        recalculateActiveTrains()
     }
 
-    private fun startRealTimeTrackEngine() {
-        trainUpdateJob?.cancel()
-        trainUpdateJob = viewModelScope.launch(Dispatchers.Default) {
+    private fun sendObservationIfEligible(gps: LiveGpsData) {
+        val binding = _monitorBinding.value ?: return
+        if (_verificationStatus.value != VerificationStatus.ON_TRACK_VERIFIED &&
+            _verificationStatus.value != VerificationStatus.STATIONARY
+        ) return
+        val now = System.currentTimeMillis()
+        if (now - lastObservationSentAt < 10_000L) return
+        lastObservationSentAt = now
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                liveTrainRepository.submitObservation(
+                    ObservationRequest(
+                        sessionId = binding.sessionId,
+                        tripId = binding.tripId,
+                        trainId = binding.trainId,
+                        latitude = gps.latitude,
+                        longitude = gps.longitude,
+                        accuracy = gps.accuracyMeters,
+                        speed = gps.speedKmh / 3.6f,
+                        heading = null,
+                        timestamp = if (gps.timestamp > 0L) gps.timestamp else now
+                    )
+                )
+            }.onFailure {
+                _userFeedbackMessage.value = "تعذر إرسال آخر ملاحظة للمصدر الحي؛ ستستمر المحاولة تلقائياً."
+            }
+        }
+    }
+
+    private fun startLiveRefresh() {
+        liveRefreshJob?.cancel()
+        liveRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
-                delay(2500L) // Smooth 2.5s position refresh along the rail track
-                trainProgressA = (trainProgressA + 0.007f) % 1.0f
-                trainProgressB = (trainProgressB + 0.005f) % 1.0f
-                recalculateActiveTrains()
+                refreshLiveTrains()
+                delay(15_000L)
+            }
+        }
+    }
+
+    fun refreshLiveTrains() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isLiveDataLoading.value = true
+            _liveDataError.value = null
+            try {
+                val trains = liveTrainRepository.getLiveTrainsForLine(
+                    _selectedSuburb.value,
+                    _selectedStation.value
+                ).filter { train ->
+                    _selectedDirectionFilter.value == TrainDirection.BOTH ||
+                        train.direction == null ||
+                        train.direction == _selectedDirectionFilter.value
+                }
+                _activeTrains.value = trains
+                checkApproachingTrain()
+            } catch (_: Exception) {
+                _activeTrains.value = emptyList()
+                _liveDataError.value = "تعذر جلب البث الحي من الخادم. تحقق من الاتصال وحاول مجدداً."
+            } finally {
+                _isLiveDataLoading.value = false
             }
         }
     }
 
     private fun recalculateActiveTrains() {
-        val suburb = _selectedSuburb.value
-        val stations = suburb.stations
-        val waitingStation = _selectedStation.value
-        val filter = _selectedDirectionFilter.value
-
-        if (stations.size < 2) return
-
-        val trains = mutableListOf<ActiveTrain>()
-
-        // Train 1: Live movement Inbound (towards Capital / Terminus A)
-        val pos1 = interpolateTrackPosition(stations, trainProgressA)
-        val dist1 = GeoUtils.calculateDistanceKm(pos1.lat, pos1.lon, waitingStation.latitude, waitingStation.longitude).toFloat()
-        val speed1 = 82.0f
-        val eta1 = GeoUtils.calculateEtaMinutes(dist1, speed1)
-
-        val isPassengerBroadcasting = _isOnboardMode.value && (_verificationStatus.value == VerificationStatus.ON_TRACK_VERIFIED || _verificationStatus.value == VerificationStatus.TUNNEL_DEAD_RECKONING)
-        val broadcasterCount = if (isPassengerBroadcasting) 3 else 1
-
-        val currentLat1 = if (isPassengerBroadcasting && gpsData.value.isGpsActive) gpsData.value.latitude else pos1.lat
-        val currentLon1 = if (isPassengerBroadcasting && gpsData.value.isGpsActive) gpsData.value.longitude else pos1.lon
-        val currentSpeed1 = if (isPassengerBroadcasting && gpsData.value.speedKmh > 5f) gpsData.value.speedKmh else speed1
-
-        val report1 = _crowdReportsMap.value["tr_${suburb.id}_1"] ?: CrowdsourcedReport(
-            crowding = CrowdingLevel.LOW,
-            delay = DelayLevel.ON_TIME,
-            reportCount = 8,
-            lastUpdatedMinutesAgo = 2
-        )
-
-        val train1 = ActiveTrain(
-            id = "tr_${suburb.id}_1",
-            trainNumber = "قطار المسافرين المباشر 🚆",
-            suburbId = suburb.id,
-            latitude = currentLat1,
-            longitude = currentLon1,
-            speedKmh = currentSpeed1,
-            nextStation = pos1.next,
-            prevStation = pos1.prev,
-            distanceToWaitingStationKm = String.format("%.1f", dist1).toFloat(),
-            etaToWaitingStationMinutes = eta1,
-            isCrowdsourced = isPassengerBroadcasting,
-            broadcasterCount = broadcasterCount,
-            status = if (eta1 <= 3) "يقترب الآن من المحطة" else "في المسار المباشر",
-            direction = TrainDirection.INBOUND,
-            destinationName = suburb.inboundTerminus,
-            platformTrack = waitingStation.defaultPlatform,
-            isTunnelEstimate = gpsData.value.isDeadReckoning,
-            crowdReport = report1
-        )
-
-        // Train 2: Outbound Train (towards Outer Suburbs)
-        val pos2 = interpolateTrackPosition(stations, 1.0f - trainProgressB)
-        val dist2 = GeoUtils.calculateDistanceKm(pos2.lat, pos2.lon, waitingStation.latitude, waitingStation.longitude).toFloat()
-        val speed2 = 70.0f
-        val eta2 = GeoUtils.calculateEtaMinutes(dist2, speed2)
-
-        val report2 = _crowdReportsMap.value["tr_${suburb.id}_2"] ?: CrowdsourcedReport(
-            crowding = CrowdingLevel.MODERATE,
-            delay = DelayLevel.DELAY_5,
-            reportCount = 14,
-            lastUpdatedMinutesAgo = 1
-        )
-
-        val train2 = ActiveTrain(
-            id = "tr_${suburb.id}_2",
-            trainNumber = "قطار الضواحي العادي 🚆",
-            suburbId = suburb.id,
-            latitude = pos2.lat,
-            longitude = pos2.lon,
-            speedKmh = speed2,
-            nextStation = pos2.prev,
-            prevStation = pos2.next,
-            distanceToWaitingStationKm = String.format("%.1f", dist2).toFloat(),
-            etaToWaitingStationMinutes = eta2,
-            isCrowdsourced = false,
-            broadcasterCount = 2,
-            status = if (eta2 <= 3) "يقترب الآن من المحطة" else "في الموعد",
-            direction = TrainDirection.OUTBOUND,
-            destinationName = suburb.outboundTerminus,
-            platformTrack = if (waitingStation.defaultPlatform == "رصيف 1") "رصيف 2" else "رصيف 1",
-            isTunnelEstimate = false,
-            crowdReport = report2
-        )
-
-        // Filter based on selected direction
-        if (filter == TrainDirection.BOTH || filter == TrainDirection.INBOUND) {
-            trains.add(train1)
-        }
-        if (filter == TrainDirection.BOTH || filter == TrainDirection.OUTBOUND) {
-            trains.add(train2)
-        }
-
-        _activeTrains.value = trains
-        checkApproachingTrain()
-
-        if (!_isOnboardMode.value && _destinationAlarm.value.isEnabled) {
-            checkDestinationAlarm(pos1.lat, pos1.lon)
-        }
-    }
-
-    private fun interpolateTrackPosition(stations: List<Station>, progress: Float): TrackPosition {
-        val totalSegments = stations.size - 1
-        val scaled = (progress * totalSegments).coerceIn(0.0f, totalSegments.toFloat())
-        val index = scaled.toInt().coerceIn(0, totalSegments - 1)
-        val frac = (scaled - index).toDouble()
-
-        val s1 = stations[index]
-        val s2 = stations[index + 1]
-
-        val lat = s1.latitude + frac * (s2.latitude - s1.latitude)
-        val lon = s1.longitude + frac * (s2.longitude - s1.longitude)
-        return TrackPosition(lat, lon, s1, s2)
+        refreshLiveTrains()
     }
 
     private fun checkApproachingTrain() {
         val waitingStation = _selectedStation.value
         val thresholdKm = _alertDistanceThresholdKm.value
 
-        val approaching = _activeTrains.value.find {
-            it.distanceToWaitingStationKm <= thresholdKm || it.etaToWaitingStationMinutes <= 3
+        val approaching = _activeTrains.value.find { train ->
+            (train.distanceToWaitingStationKm?.let { it <= thresholdKm } == true) ||
+                (train.etaToWaitingStationMinutes?.let { it <= 3 } == true)
         }
 
         if (approaching != null) {
-            val alertText = "تنبيه! ${approaching.trainNumber} على بُعد ${approaching.distanceToWaitingStationKm} كم من محطة (${waitingStation.name}) - الوصول: ${approaching.etaToWaitingStationMinutes} دقائق."
-            _approachingAlert.value = alertText
+            val distanceText = approaching.distanceToWaitingStationKm?.let { "%.1f كم".format(it) } ?: "المسافة غير متوفرة"
+            val etaText = approaching.etaToWaitingStationMinutes?.let { "$it دقائق" } ?: "الوقت غير متوفر"
+            _approachingAlert.value = "تنبيه! ${approaching.trainNumber} على بُعد $distanceText من محطة (${waitingStation.name}) - الوصول: $etaText."
 
+            val eta = approaching.etaToWaitingStationMinutes
+            val distance = approaching.distanceToWaitingStationKm
             val now = System.currentTimeMillis()
-            if (_isWhistleSoundEnabled.value && (now - lastWhistleAlertTime > 40000L)) {
+            if (_isWhistleSoundEnabled.value && eta != null && distance != null && (now - lastWhistleAlertTime > 40000L)) {
                 lastWhistleAlertTime = now
                 triggerSelectedSound()
-
                 if (_isBackgroundNotificationEnabled.value) {
                     TrainNotificationHelper.showApproachingNotification(
                         app,
                         approaching.trainNumber,
                         waitingStation.name,
-                        approaching.etaToWaitingStationMinutes,
-                        approaching.distanceToWaitingStationKm
+                        eta,
+                        distance
                     )
                 }
             }
+        } else {
+            _approachingAlert.value = null
         }
     }
 
@@ -704,6 +718,6 @@ class TrainViewModel(private val app: Application) : AndroidViewModel(app) {
         super.onCleared()
         locationTracker.stopLocationUpdates()
         TrainNotificationHelper.clearOngoingNotification(app)
-        trainUpdateJob?.cancel()
+        liveRefreshJob?.cancel()
     }
 }

@@ -54,6 +54,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -102,6 +103,8 @@ fun HomeScreen(
     val selectedSuburb by viewModel.selectedSuburb.collectAsState()
     val selectedStation by viewModel.selectedStation.collectAsState()
     val activeTrains by viewModel.activeTrains.collectAsState()
+    val isLiveDataLoading by viewModel.isLiveDataLoading.collectAsState()
+    val liveDataError by viewModel.liveDataError.collectAsState()
     val alert by viewModel.approachingAlert.collectAsState()
     val isOnboard by viewModel.isOnboardMode.collectAsState()
     val destinationAlarm by viewModel.destinationAlarm.collectAsState()
@@ -742,18 +745,49 @@ fun HomeScreen(
                 .weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(activeTrains) { train ->
-                EnhancedTrainCard(
-                    train = train,
-                    waitingStation = selectedStation,
-                    onInspectClicked = {
-                        viewModel.selectTrain(train)
-                        onNavigateToMap()
-                    },
-                    onReportClicked = {
-                        reportingTrain = train
+            if (isLiveDataLoading && activeTrains.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color(0xFF38BDF8))
                     }
-                )
+                }
+            } else if (liveDataError != null && activeTrains.isEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(liveDataError ?: "تعذر جلب البيانات", color = Color(0xFFF87171), textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(onClick = { viewModel.refreshLiveTrains() }) { Text("إعادة المحاولة") }
+                    }
+                }
+            } else if (activeTrains.isEmpty()) {
+                item {
+                    Text(
+                        text = "لا يوجد بث حي على هذا الخط حالياً. فعّل وضع على متن القطار للمساهمة.",
+                        modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        color = Color(0xFF94A3B8),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                items(activeTrains) { train ->
+                    EnhancedTrainCard(
+                        train = train,
+                        waitingStation = selectedStation,
+                        onInspectClicked = {
+                            viewModel.selectTrain(train)
+                            onNavigateToMap()
+                        },
+                        onReportClicked = {
+                            reportingTrain = train
+                        }
+                    )
+                }
             }
         }
     }
@@ -1441,7 +1475,7 @@ fun EnhancedTrainCard(
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "${train.direction.symbol} باتجاه: ${train.destinationName}",
+                                text = "${train.direction?.symbol ?: "•"} باتجاه: ${train.destinationName ?: "غير متوفر"}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF38BDF8),
                                 fontWeight = FontWeight.Bold
@@ -1456,7 +1490,7 @@ fun EnhancedTrainCard(
                     color = Color(0xFF047857)
                 ) {
                     Text(
-                        text = train.platformTrack,
+                        text = train.platformTrack ?: "الرصيف غير متوفر",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White,
@@ -1482,20 +1516,20 @@ fun EnhancedTrainCard(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "المحطة التالية: ${train.nextStation.name}",
+                        text = "المحطة التالية: ${train.nextStation?.name ?: "غير متوفر"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF94A3B8)
                     )
                 }
 
-                if (train.isTunnelEstimate) {
+                if (train.truth?.uppercase() == "ESTIMATED") {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = Color(0xFFB45309).copy(alpha = 0.3f),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B))
                     ) {
                         Text(
-                            text = "🚇 نفق (Dead-Reckoning)",
+                            text = "تقدير من الخادم — ليس GPS مباشر",
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFFFDE68A)
@@ -1520,21 +1554,21 @@ fun EnhancedTrainCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = train.crowdReport.crowding.emoji, fontSize = 14.sp)
+                        Text(text = train.crowdReport?.crowding?.emoji ?: "•", fontSize = 14.sp)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = train.crowdReport.crowding.titleAr,
+                            text = train.crowdReport?.crowding?.titleAr ?: "تقارير الاكتظاظ غير متوفرة",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(train.crowdReport.crowding.colorHex),
+                            color = train.crowdReport?.crowding?.colorHex?.let(::Color) ?: Color(0xFF94A3B8),
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = train.crowdReport.delay.emoji, fontSize = 13.sp)
+                        Text(text = train.crowdReport?.delay?.emoji ?: "•", fontSize = 13.sp)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = train.crowdReport.delay.titleAr,
+                            text = train.crowdReport?.delay?.titleAr ?: "تقارير التأخير غير متوفرة",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (train.crowdReport.delay.delayMinutes > 0) Color(0xFFFBBF24) else Color(0xFF34D399)
+                            color = if ((train.crowdReport?.delay?.delayMinutes ?: 0) > 0) Color(0xFFFBBF24) else Color(0xFF94A3B8)
                         )
                     }
 
@@ -1590,7 +1624,7 @@ fun EnhancedTrainCard(
                             Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(13.dp), tint = Color(0xFF38BDF8))
                             Spacer(modifier = Modifier.width(2.dp))
                             Text(
-                                text = "${train.distanceToWaitingStationKm} كم",
+                                text = train.distanceToWaitingStationKm?.let { "%.1f كم".format(it) } ?: "غير متوفر",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -1609,7 +1643,7 @@ fun EnhancedTrainCard(
                             Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(13.dp), tint = Color(0xFF34D399))
                             Spacer(modifier = Modifier.width(2.dp))
                             Text(
-                                text = "${train.speedKmh.toInt()} كم/سا",
+                                text = train.speedKmh?.let { "${it.toInt()} كم/سا" } ?: "غير متوفر",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -1628,7 +1662,7 @@ fun EnhancedTrainCard(
                             Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(13.dp), tint = Color(0xFFF87171))
                             Spacer(modifier = Modifier.width(2.dp))
                             Text(
-                                text = "${train.etaToWaitingStationMinutes} دقيقة",
+                                text = train.etaToWaitingStationMinutes?.let { "$it دقيقة" } ?: "غير متوفر",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFFF87171)
