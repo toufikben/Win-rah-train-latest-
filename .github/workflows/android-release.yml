@@ -118,7 +118,12 @@ jobs:
           AAB="app/build/outputs/bundle/release/app-release.aab"
           test -s "$APK"
           test -s "$AAB"
-          apksigner verify --verbose "$APK"
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$apksigner_path" ]; then
+            echo "apksigner was not found under $ANDROID_HOME/build-tools." >&2
+            exit 1
+          fi
+          "$apksigner_path" verify --verbose "$APK"
           jarsigner -verify -verbose -certs "$AAB" >/dev/null
           echo "Verified: $APK"
           echo "Verified: $AAB"
