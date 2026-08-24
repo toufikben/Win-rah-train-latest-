@@ -81,6 +81,7 @@ fun MapScreen(viewModel: TrainViewModel) {
     val trackGeometry by viewModel.trackGeometry.collectAsState()
     val trackGeometryLoading by viewModel.trackGeometryLoading.collectAsState()
     val trackGeometryError by viewModel.trackGeometryError.collectAsState()
+    val isSimulationMode by viewModel.isSimulationMode.collectAsState()
 
     LaunchedEffect(selectedSuburb.id) {
         viewModel.refreshTrackGeometry(selectedSuburb)
@@ -108,6 +109,8 @@ fun MapScreen(viewModel: TrainViewModel) {
         "REFERENCE_NETWORK_DERIVED" -> "المسار: تقريبي بين المحطات، ليس محور سكة ممسوحًا"
         null -> "المسار: ترتيب محطات تقريبي (لا توجد هندسة منشورة)"
         else -> "المسار: مصدر غير معروف"
+    }.let { base ->
+        if (isSimulationMode) "المصدر: محاكاة محلية فقط\n$base" else base
     }
 
     // Push only real live coordinates to the Leaflet layer; never create a fallback train.
@@ -377,7 +380,13 @@ fun MapScreen(viewModel: TrainViewModel) {
                 // MAP TAB VIEW
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Real OpenStreetMap HTML with Leaflet CSS/JS
-                    AndroidView(
+                    androidx.compose.runtime.key(
+                        selectedSuburb.id,
+                        trackGeometry?.sourceKind,
+                        trackGeometry?.coordinates?.hashCode(),
+                        isSimulationMode
+                    ) {
+                        AndroidView(
                         factory = { ctx ->
                             WebView(ctx).apply {
                                 setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
@@ -560,7 +569,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                         }
                     },
                     modifier = Modifier.fillMaxSize()
-                                    )
+                        )
+                    }
 
                     Surface(
                         modifier = Modifier

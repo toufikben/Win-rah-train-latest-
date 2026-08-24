@@ -35,6 +35,7 @@ import com.example.model.TransitConnection
 import com.example.model.TransitType
 import com.example.model.VerificationStatus
 import com.example.notification.TrainNotificationHelper
+import com.example.simulation.LocalTrainSimulation
 import com.example.utils.GeoUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -79,6 +80,10 @@ class TrainViewModel private constructor(
         TrainRepository.suburbLines.filterNot { it.id in setOf("airport_algiers", "thenia_tizi") }
     )
     val suburbs: StateFlow<List<SuburbLine>> = _suburbs.asStateFlow()
+
+    private val _isSimulationMode = MutableStateFlow(false)
+    val isSimulationMode: StateFlow<Boolean> = _isSimulationMode.asStateFlow()
+    private var publishedUiLineIds: Set<String> = emptySet()
 
     private val _selectedSuburb = MutableStateFlow(TrainRepository.suburbLines.first())
     val selectedSuburb: StateFlow<SuburbLine> = _selectedSuburb.asStateFlow()
@@ -183,6 +188,7 @@ class TrainViewModel private constructor(
     private var lastAlarmRingTime = 0L
 
     private var liveRefreshJob: Job? = null
+    private var simulationStartedAtSeconds = System.currentTimeMillis() / 1000L
     private val _monitorBinding = MutableStateFlow<MonitorBinding?>(null)
     val monitorBinding: StateFlow<MonitorBinding?> = _monitorBinding.asStateFlow()
     private var lastObservationSentAt = 0L
@@ -219,6 +225,7 @@ class TrainViewModel private constructor(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { liveTrainRepository.getPublishedUiLineIds() }
                 .onSuccess { publishedIds ->
+                    publishedUiLineIds = publishedIds
                     val published = TrainRepository.suburbLines.filter { it.id in publishedIds }
                     if (published.isNotEmpty()) {
                         _suburbs.value = published
@@ -240,6 +247,65 @@ class TrainViewModel private constructor(
         _selectedSuburb.value = suburb
         _selectedStation.value = suburb.stations.getOrElse(1) { suburb.stations.first() }
         recalculateActiveTrains()
+    }
+
+    fun sendSimulationNotificationNow() {
+        if (!_isSimulationMode.value) {
+            _userFeedbackMessage.value = "شغّل المحاكاة أولاً لإرسال إشعار تجريبي."
+            return
+        }
+        val sample = _activeTrains.value.firstOrNull() ?: return
+        TrainNotificationHelper.showSimulationNotification(
+            app,
+            _selectedSuburb.value.name,
+            _selectedStation.value.name,
+            sample.etaToWaitingStationMinutes ?: 0,
+            sample.speedKmh ?: 0f,
+            sample.distanceToWaitingStationKm ?: 0f
+        )
+        _userFeedbackMessage.value = "تم إطلاق إشعار محاكاة محلي؛ لا يمثل قطارًا حيًا."
+    }
+
+    fun setSimulationMode(enabled: Boolean) {
+        if (_isSimulationMode.value == enabled) return
+        _isSimulationMode.value = enabled
+        if (enabled) {
+            simulationStartedAtSeconds = System.currentTimeMillis() / 1000L
+            _suburbs.value = TrainRepository.suburbLines
+            liveRefreshJob?.cancel()
+            updateSimulatedTrains()
+            val sample = _activeTrains.value.firstOrNull()
+            if (sample != null) {
+                TrainNotificationHelper.showSimulationNotification(
+                    app,
+                    _selectedSuburb.value.name,
+                    _selectedStation.value.name,
+                    sample.etaToWaitingStationMinutes ?: 0,
+                    sample.speedKmh ?: 0f,
+                    sample.distanceToWaitingStationKm ?: 0f
+                )
+            }
+            startLiveRefresh()
+            _userFeedbackMessage.value = "تم تشغيل محاكاة محلية: لا توجد بيانات حية ولا إرسال إلى الخادم."
+        } else {
+            _isSimulationMode.value = false
+            _suburbs.value = if (publishedUiLineIds.isNotEmpty()) {
+                TrainRepository.suburbLines.filter { it.id in publishedUiLineIds }
+            } else {
+                TrainRepository.suburbLines.filterNot { it.id in setOf("airport_algiers", "thenia_tizi") }
+            }
+            if (_selectedSuburb.value.id !in _suburbs.value.map { it.id }) {
+                _selectedSuburb.value = _suburbs.value.first()
+                _selectedStation.value = _selectedSuburb.value.stations.getOrElse(1) { _selectedSuburb.value.stations.first() }
+            }
+            _activeTrains.value = emptyList()
+            liveRefreshJob?.cancel()
+            if (enableLivePolling) {
+                refreshLiveTrains()
+                startLiveRefresh()
+            }
+            _userFeedbackMessage.value = "تم إيقاف المحاكاة والعودة إلى البيانات الحية/القراءة العادية."
+        }
     }
 
     fun selectStation(station: Station) {
@@ -754,8 +820,13 @@ class TrainViewModel private constructor(
         liveRefreshJob?.cancel()
         liveRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
-                refreshLiveTrains()
-                delay(15_000L)
+                if (_isSimulationMode.value) {
+                    updateSimulatedTrains()
+                    delay(1_000L)
+                } else {
+                    refreshLiveTrains()
+                    delay(15_000L)
+                }
             }
         }
     }
@@ -764,6 +835,11 @@ class TrainViewModel private constructor(
         viewModelScope.launch(Dispatchers.IO) {
             _isLiveDataLoading.value = true
             _liveDataError.value = null
+            if (_isSimulationMode.value) {
+                updateSimulatedTrains()
+                _isLiveDataLoading.value = false
+                return@launch
+            }
             try {
                 val trains = liveTrainRepository.getLiveTrainsForLine(
                     _selectedSuburb.value,
@@ -786,6 +862,19 @@ class TrainViewModel private constructor(
 
     private fun recalculateActiveTrains() {
         refreshLiveTrains()
+    }
+
+    private fun updateSimulatedTrains() {
+        val elapsed = (System.currentTimeMillis() / 1000L - simulationStartedAtSeconds).coerceAtLeast(0L)
+        _activeTrains.value = LocalTrainSimulation.trainsFor(
+            _selectedSuburb.value,
+            _selectedStation.value,
+            elapsed
+        ).filter { train ->
+            _selectedDirectionFilter.value == TrainDirection.BOTH || train.direction == _selectedDirectionFilter.value
+        }
+        _liveDataError.value = null
+        checkApproachingTrain()
     }
 
     private fun checkApproachingTrain() {
