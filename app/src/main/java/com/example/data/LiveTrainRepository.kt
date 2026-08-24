@@ -15,6 +15,11 @@ import com.example.model.TrainDirection
 import com.example.utils.GeoUtils
 import java.util.UUID
 
+data class TrackGeometry(
+    val coordinates: List<List<Double>>,
+    val sourceKind: String
+)
+
 class LiveTrainRepository(
     private val api: com.example.data.remote.TrainApi = BackendService.api
 ) {
@@ -43,6 +48,29 @@ class LiveTrainRepository(
             if (!matchesWinRahLine(line.id, backendLineId)) return@mapNotNull null
             toActiveTrain(dto, line, waitingStation)
         }
+    }
+
+    suspend fun getPublishedUiLineIds(): Set<String> {
+        if (tripsById.isEmpty()) refreshReferenceData()
+        return backendLineIdsByUiLine
+            .filterValues { acceptedIds -> tripsById.values.any { it.lineId in acceptedIds } }
+            .keys
+    }
+
+    suspend fun getRailwayGeometryForLine(line: SuburbLine): TrackGeometry? {
+        val response = api.getRailwaySegments()
+        val acceptedIds = backendLineIdsByUiLine[line.id].orEmpty()
+        val feature = response.features.firstOrNull { candidate ->
+            val geometry = candidate.geometry
+            candidate.properties?.lineId in acceptedIds &&
+                geometry?.type == "LineString" &&
+                !geometry.coordinates.isNullOrEmpty()
+        } ?: return null
+        val geometry = feature.geometry ?: return null
+        return TrackGeometry(
+            coordinates = geometry.coordinates.orEmpty(),
+            sourceKind = feature.properties?.sourceKind ?: "UNKNOWN",
+        )
     }
 
     suspend fun createMonitorSession(tripId: String, trainId: String): MonitorSessionDto {
@@ -203,7 +231,7 @@ class LiveTrainRepository(
             "bd458a9a-5dab-5ee0-8c02-063626e8b0f2",
         ),
         "airport_algiers" to setOf(
-            "line-suburb-airport",
+            "line-suburb-airport-algiers",
             "38655abf-3a8c-5053-9c9e-fad27fa779dd",
         ),
         "thenia_tizi" to setOf(

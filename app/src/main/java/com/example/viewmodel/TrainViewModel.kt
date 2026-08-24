@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
 import com.example.data.LiveTrainRepository
+import com.example.data.TrackGeometry
 import com.example.data.TrainRepository
 import com.example.data.remote.dto.ObservationRequest
 import com.example.data.remote.dto.ReportRequest
@@ -43,6 +44,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 data class TrackPosition(
     val lat: Double,
@@ -60,6 +63,7 @@ class TrainViewModel private constructor(
     constructor(app: Application, enableLivePolling: Boolean) : this(app, enableLivePolling, LiveTrainRepository())
 
     private val locationTracker = LocationTracker(app)
+    private val localPrefs = app.getSharedPreferences("winrah_local_state", Context.MODE_PRIVATE)
 
     val gpsData: StateFlow<LiveGpsData> = locationTracker.gpsData
     val isTrackingLocation: StateFlow<Boolean> = locationTracker.isTracking
@@ -70,7 +74,10 @@ class TrainViewModel private constructor(
     private val _liveDataError = MutableStateFlow<String?>(null)
     val liveDataError: StateFlow<String?> = _liveDataError.asStateFlow()
 
-    private val _suburbs = MutableStateFlow(TrainRepository.suburbLines)
+    // Deferred local catalog entries are not shown as operational until the backend publishes trips.
+    private val _suburbs = MutableStateFlow(
+        TrainRepository.suburbLines.filterNot { it.id in setOf("airport_algiers", "thenia_tizi") }
+    )
     val suburbs: StateFlow<List<SuburbLine>> = _suburbs.asStateFlow()
 
     private val _selectedSuburb = MutableStateFlow(TrainRepository.suburbLines.first())
@@ -117,7 +124,30 @@ class TrainViewModel private constructor(
     private val _lineAlerts = MutableStateFlow<List<LineAlert>>(emptyList())
     val lineAlerts: StateFlow<List<LineAlert>> = _lineAlerts.asStateFlow()
 
+    private val _trackGeometry = MutableStateFlow<TrackGeometry?>(null)
+    val trackGeometry: StateFlow<TrackGeometry?> = _trackGeometry.asStateFlow()
+
+    private val _trackGeometryLoading = MutableStateFlow(false)
+    val trackGeometryLoading: StateFlow<Boolean> = _trackGeometryLoading.asStateFlow()
+
+    private val _trackGeometryError = MutableStateFlow<String?>(null)
+    val trackGeometryError: StateFlow<String?> = _trackGeometryError.asStateFlow()
+
     private val _selectedLineAlertModal = MutableStateFlow<LineAlert?>(null)
+
+    fun refreshTrackGeometry(line: SuburbLine) {
+        _trackGeometryLoading.value = true
+        _trackGeometryError.value = null
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { liveTrainRepository.getRailwayGeometryForLine(line) }
+                .onSuccess { geometry -> _trackGeometry.value = geometry }
+                .onFailure { error ->
+                    _trackGeometry.value = null
+                    _trackGeometryError.value = error.message ?: "map_geometry_unavailable"
+                }
+            _trackGeometryLoading.value = false
+        }
+    }
     val selectedLineAlertModal: StateFlow<LineAlert?> = _selectedLineAlertModal.asStateFlow()
 
     // 6. NEARBY STATIONS SMART RADAR & MULTI-MODAL INTERCHANGE
@@ -158,6 +188,8 @@ class TrainViewModel private constructor(
     private var lastObservationSentAt = 0L
 
     init {
+        restoreLocalState()
+
         // Initialize Android notification channels
         TrainNotificationHelper.initNotificationChannels(app)
 
@@ -182,6 +214,20 @@ class TrainViewModel private constructor(
                     checkDestinationAlarm(gps.latitude, gps.longitude)
                 }
             }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { liveTrainRepository.getPublishedUiLineIds() }
+                .onSuccess { publishedIds ->
+                    val published = TrainRepository.suburbLines.filter { it.id in publishedIds }
+                    if (published.isNotEmpty()) {
+                        _suburbs.value = published
+                        if (_selectedSuburb.value.id !in publishedIds) {
+                            _selectedSuburb.value = published.first()
+                            _selectedStation.value = published.first().stations.getOrElse(1) { published.first().stations.first() }
+                        }
+                    }
+                }
         }
 
         if (enableLivePolling) {
@@ -381,7 +427,7 @@ class TrainViewModel private constructor(
     fun submitCrowdingReport(trainId: String, crowding: CrowdingLevel) {
         submitEvidenceReport(
             trainId = trainId,
-            reportType = "CROWDING",
+            reportType = "OTHER",
             description = "إفادة مستخدم: ${crowding.titleAr}"
         )
     }
@@ -389,21 +435,21 @@ class TrainViewModel private constructor(
     fun submitDelayReport(trainId: String, delay: DelayLevel) {
         submitEvidenceReport(
             trainId = trainId,
-            reportType = "DELAY",
+            reportType = "DELAYED",
             description = "إفادة مستخدم: ${delay.titleAr}"
         )
     }
 
     fun submitCrowdingReport(crowding: CrowdingLevel) {
         submitBoundEvidenceReport(
-            reportType = "CROWDING",
+            reportType = "OTHER",
             description = "إفادة مستخدم: ${crowding.titleAr}"
         )
     }
 
     fun submitDelayReport(delay: DelayLevel) {
         submitBoundEvidenceReport(
-            reportType = "DELAY",
+            reportType = "DELAYED",
             description = "إفادة مستخدم: ${delay.titleAr}"
         )
     }
@@ -472,6 +518,7 @@ class TrainViewModel private constructor(
             _userFeedbackMessage.value = "تمت إضافة (${station.name}) إلى محطاتك المفضلة $emoji"
         }
         _favoriteStations.value = current
+        persistFavorites()
     }
 
     fun selectFavorite(favorite: FavoriteStation) {
@@ -543,27 +590,89 @@ class TrainViewModel private constructor(
     // Settings Mutators
     fun setWhistleSoundEnabled(enabled: Boolean) {
         _isWhistleSoundEnabled.value = enabled
+        persistSettings()
     }
 
     fun setSelectedSoundType(type: TrainSoundType) {
         _selectedSoundType.value = type
+        persistSettings()
     }
 
     fun setAlertDistanceThreshold(km: Float) {
-        _alertDistanceThresholdKm.value = km
+        _alertDistanceThresholdKm.value = km.coerceIn(0.5f, 20f)
+        persistSettings()
         checkApproachingTrain()
     }
 
     fun setVibrationEnabled(enabled: Boolean) {
         _isVibrationEnabled.value = enabled
+        persistSettings()
     }
 
     fun setBackgroundNotificationEnabled(enabled: Boolean) {
         _isBackgroundNotificationEnabled.value = enabled
+        persistSettings()
     }
 
     fun setSelectedTheme(theme: String) {
         _selectedTheme.value = theme
+        persistSettings()
+    }
+
+    private fun persistSettings() {
+        localPrefs.edit()
+            .putBoolean("whistle_enabled", _isWhistleSoundEnabled.value)
+            .putString("sound_type", _selectedSoundType.value.name)
+            .putFloat("alert_distance_km", _alertDistanceThresholdKm.value)
+            .putBoolean("vibration_enabled", _isVibrationEnabled.value)
+            .putBoolean("background_notification_enabled", _isBackgroundNotificationEnabled.value)
+            .putString("theme", _selectedTheme.value)
+            .apply()
+    }
+
+    private fun persistFavorites() {
+        val json = JSONArray().apply {
+            _favoriteStations.value.forEach { favorite ->
+                put(JSONObject().apply {
+                    put("station_id", favorite.station.id)
+                    put("suburb_id", favorite.suburbId)
+                    put("tag", favorite.tag)
+                    put("emoji", favorite.tagEmoji)
+                })
+            }
+        }
+        localPrefs.edit().putString("favorites", json.toString()).apply()
+    }
+
+    private fun restoreLocalState() {
+        _isWhistleSoundEnabled.value = localPrefs.getBoolean("whistle_enabled", true)
+        _selectedSoundType.value = runCatching {
+            TrainSoundType.valueOf(localPrefs.getString("sound_type", TrainSoundType.STEAM_WHISTLE.name)!!)
+        }.getOrDefault(TrainSoundType.STEAM_WHISTLE)
+        _alertDistanceThresholdKm.value = localPrefs.getFloat("alert_distance_km", 3.5f).coerceIn(0.5f, 20f)
+        _isVibrationEnabled.value = localPrefs.getBoolean("vibration_enabled", true)
+        _isBackgroundNotificationEnabled.value = localPrefs.getBoolean("background_notification_enabled", true)
+        _selectedTheme.value = localPrefs.getString("theme", "dark") ?: "dark"
+
+        val raw = localPrefs.getString("favorites", null) ?: return
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return
+        val restored = buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val suburb = TrainRepository.suburbLines.firstOrNull { it.id == item.optString("suburb_id") } ?: continue
+                val station = suburb.stations.firstOrNull { it.id == item.optString("station_id") } ?: continue
+                add(
+                    FavoriteStation(
+                        station = station,
+                        suburbId = suburb.id,
+                        suburbName = suburb.name,
+                        tag = item.optString("tag", "محطة مفضلة"),
+                        tagEmoji = item.optString("emoji", "⭐"),
+                    )
+                )
+            }
+        }
+        _favoriteStations.value = restored
     }
 
     fun triggerSelectedSound(soundType: TrainSoundType = _selectedSoundType.value) {

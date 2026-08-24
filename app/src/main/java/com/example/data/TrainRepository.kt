@@ -1,7 +1,5 @@
 package com.example.data
 
-import com.example.model.AlertSeverity
-import com.example.model.LineAlert
 import com.example.model.NearbyStationInfo
 import com.example.model.Station
 import com.example.model.StationInterchange
@@ -113,53 +111,6 @@ object TrainRepository {
                 Station("st_tzo_t", "تيزي وزو (المحطة الرئيسية)", "TZO", 36.7120, 4.0480, 9, "رصيف 1"),
                 Station("st_oai_t", "وادي عيسي (القطب الجامعي)", "OAI", 36.6980, 4.0950, 10, "رصيف 2")
             )
-        )
-    )
-
-    val initialLineAlerts = listOf(
-        LineAlert(
-            id = "alt_1",
-            lineId = "thnia_algiers",
-            lineName = "خط الثنية - الجزائر",
-            title = "حركة قطارات عادية ومنتظمة 🟢",
-            description = "كافة القطارات الكهربائية والحرارية تعمل بانسيابية تامة عبر جميع المحطات.",
-            severity = AlertSeverity.NORMAL,
-            timeAgo = "منذ 10 دقائق",
-            weatherTemperature = "25°C",
-            weatherCondition = "مشمس ولطيف"
-        ),
-        LineAlert(
-            id = "alt_2",
-            lineId = "algiers_affroun",
-            lineName = "خط الجزائر - البليدة - العفرون",
-            title = "أشغال صيانة وإبطاء سرعة مؤقت ⚠️",
-            description = "أشغال تجديد قضبان السكة بين محطتي بوفاريك والبليدة مع تأخير متوقع بين 5 إلى 10 دقائق.",
-            severity = AlertSeverity.WARNING,
-            timeAgo = "منذ 25 دقيقة",
-            weatherTemperature = "27°C",
-            weatherCondition = "غيوم خفيفة"
-        ),
-        LineAlert(
-            id = "alt_3",
-            lineId = "airport_algiers",
-            lineName = "خط مطار هواري بومدين",
-            title = "تواتر سريع كل 30 دقيقة ✈️",
-            description = "القطار المكوكي للمطار يعمل بدقة متناهية مع مكيفات الهواء وخدمة نقل الأمتعة.",
-            severity = AlertSeverity.NORMAL,
-            timeAgo = "منذ 5 دقائق",
-            weatherTemperature = "24°C",
-            weatherCondition = "جو مثالي"
-        ),
-        LineAlert(
-            id = "alt_4",
-            lineId = "thenia_tizi",
-            lineName = "خط الثنية - تيزي وزو",
-            title = "انسيابية كاملة عبر الأنفاق الجبلية ℹ️",
-            description = "نظام Dead-Reckoning مفعل تلقائياً لتعويض تغطية GPS أثناء عبور أنفاق ذراع بن خدة.",
-            severity = AlertSeverity.INFO,
-            timeAgo = "منذ 40 دقيقة",
-            weatherTemperature = "22°C",
-            weatherCondition = "نسيم منعش"
         )
     )
 

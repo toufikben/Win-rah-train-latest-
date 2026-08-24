@@ -6,6 +6,7 @@ import com.example.data.remote.dto.MonitorSessionDto
 import com.example.data.remote.dto.MonitorSessionRequest
 import com.example.data.remote.dto.ObservationRequest
 import com.example.data.remote.dto.ReportRequest
+import com.example.data.remote.dto.RailwaySegmentsResponse
 import com.example.data.remote.dto.StationDto
 import com.example.data.remote.dto.TripDto
 import com.example.data.remote.dto.TripStopDto
@@ -115,6 +116,7 @@ class LiveTrainRepositoryTest {
         override suspend fun getTrips(lineId: String?): List<TripDto> = trips
         override suspend fun getTripStops(tripId: String): List<TripStopDto> = emptyList()
         override suspend fun getLiveTrains(): List<LiveTrainDto> = emptyList()
+        override suspend fun getRailwaySegments(): RailwaySegmentsResponse = RailwaySegmentsResponse()
         override suspend fun getNearbyTrains(
             latitude: Double,
             longitude: Double,

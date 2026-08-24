@@ -78,10 +78,16 @@ fun MapScreen(viewModel: TrainViewModel) {
     val activeTrains by viewModel.activeTrains.collectAsState()
     val selectedTrain by viewModel.selectedTrain.collectAsState()
     val gpsData by viewModel.gpsData.collectAsState()
+    val trackGeometry by viewModel.trackGeometry.collectAsState()
+    val trackGeometryLoading by viewModel.trackGeometryLoading.collectAsState()
+    val trackGeometryError by viewModel.trackGeometryError.collectAsState()
+
+    LaunchedEffect(selectedSuburb.id) {
+        viewModel.refreshTrackGeometry(selectedSuburb)
+    }
 
     var activeTab by remember { mutableStateOf("map") } // "map" or "stations"
     var showMapKeysMenu by remember { mutableStateOf(false) }
-    var selectedMapLayer by remember { mutableStateOf("streets") }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
     val primaryTrain = selectedTrain ?: activeTrains.firstOrNull()
@@ -91,6 +97,18 @@ fun MapScreen(viewModel: TrainViewModel) {
     val trainSpeed = primaryTrain?.speedKmh?.toInt()?.toString() ?: "غير متوفر"
     val trainEta = primaryTrain?.etaToWaitingStationMinutes?.toString() ?: "غير متوفر"
     val trainDistKm = primaryTrain?.distanceToWaitingStationKm?.let { "%.1f".format(it) } ?: "غير متوفر"
+    val serverTrackPointsJson = trackGeometry?.coordinates
+        ?.mapNotNull { coordinate ->
+            if (coordinate.size >= 2) "[${coordinate[1]}, ${coordinate[0]}]" else null
+        }
+        ?.joinToString(prefix = "[", postfix = "]")
+        ?: "[]"
+    val mapSourceLabel = when (trackGeometry?.sourceKind) {
+        "OSM_REVIEWED" -> "المسار: هندسة OSM مراجعة"
+        "REFERENCE_NETWORK_DERIVED" -> "المسار: تقريبي بين المحطات، ليس محور سكة ممسوحًا"
+        null -> "المسار: ترتيب محطات تقريبي (لا توجد هندسة منشورة)"
+        else -> "المسار: مصدر غير معروف"
+    }
 
     // Push only real live coordinates to the Leaflet layer; never create a fallback train.
     LaunchedEffect(trainLat, trainLon, primaryTrain?.trainNumber, trainSpeed, trainEta, primaryTrain != null) {
@@ -450,6 +468,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                                     var stations = [$stationsJson];
                                     var initialLat = $trainLat;
                                     var initialLon = $trainLon;
+                                    var serverTrackPoints = $serverTrackPointsJson;
 
                                     var map = L.map('map', {
                                         zoomControl: false,
@@ -461,8 +480,10 @@ fun MapScreen(viewModel: TrainViewModel) {
                                         maxZoom: 19
                                     }).addTo(map);
 
-                                    // Draw Railway Track Polyline
-                                    var trackPoints = stations.map(function(s) { return [s.lat, s.lng]; });
+                                    // Use server GeoJSON when it matches the canonical line; otherwise draw the local station-order fallback.
+                                    var trackPoints = serverTrackPoints.length >= 2
+                                        ? serverTrackPoints
+                                        : stations.map(function(s) { return [s.lat, s.lng]; });
                                     var trackLine = L.polyline(trackPoints, {
                                         color: '#0284C7',
                                         weight: 5,
@@ -517,14 +538,18 @@ fun MapScreen(viewModel: TrainViewModel) {
                                     window.centerOnTrain = function() {
                                         if (trainMarker) {
                                             map.panTo(trainMarker.getLatLng(), { animate: true });
+                                        } else if (trackPoints.length >= 2) {
+                                            map.fitBounds(trackLine.getBounds(), { padding: [24, 24] });
+                                        }
+                                    };
+                                    window.fitTrack = function() {
+                                        if (trackPoints.length >= 2) {
+                                            map.fitBounds(trackLine.getBounds(), { padding: [24, 24] });
                                         }
                                     };
 
-                                    window.zoomInMap = function() { map.zoomIn(); };
+                                    window.zoomInMap = function() { map.zoomIn(); }
                                     window.zoomOutMap = function() { map.zoomOut(); };
-                                    window.toggleLayer = function(layerType) {
-                                        // Tile layer switcher
-                                    };
                                 </script>
                             </body>
                             </html>
@@ -535,9 +560,25 @@ fun MapScreen(viewModel: TrainViewModel) {
                         }
                     },
                     modifier = Modifier.fillMaxSize()
-                )
+                                    )
+
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(10.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xCC020617)
+                    ) {
+                        Text(
+                            text = if (trackGeometryLoading) "جاري تحميل هندسة الخريطة..." else if (trackGeometryError != null) "$mapSourceLabel\nتعذر الاتصال بالخادم" else mapSourceLabel,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
 
                 // FLOATING MAP CONTROLS (Right side - exactly matching the screenshot)
+
                 Column(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
@@ -604,13 +645,13 @@ fun MapScreen(viewModel: TrainViewModel) {
                             .size(38.dp)
                             .clip(CircleShape)
                             .clickable {
-                                webViewInstance?.evaluateJavascript("if(window.centerOnTrain) window.centerOnTrain();", null)
+                                webViewInstance?.evaluateJavascript("if(window.fitTrack) window.fitTrack();", null)
                             },
                         color = Color(0xDD1E293B),
                         shadowElevation = 4.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Fullscreen, contentDescription = "ملء الشاشة", tint = Color.White, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Fullscreen, contentDescription = "عرض كامل للمسار", tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                     }
 
@@ -620,7 +661,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                             .size(38.dp)
                             .clip(CircleShape)
                             .clickable {
-                                showMapKeysMenu = true
+                                viewModel.refreshTrackGeometry(selectedSuburb)
+                                showMapKeysMenu = false
                             },
                         color = Color(0xDD1E293B),
                         shadowElevation = 4.dp
@@ -668,16 +710,13 @@ fun MapScreen(viewModel: TrainViewModel) {
                     ) {
                         DropdownMenuItem(
                             text = { Text("خريطة الشوارع (OpenStreetMap)") },
-                            onClick = {
-                                selectedMapLayer = "streets"
-                                showMapKeysMenu = false
-                            }
+                            onClick = { showMapKeysMenu = false }
                         )
                         DropdownMenuItem(
                             text = { Text("إظهار كل محطات السكة الحديدية") },
                             onClick = {
                                 showMapKeysMenu = false
-                                webViewInstance?.evaluateJavascript("if(window.centerOnTrain) window.centerOnTrain();", null)
+                                webViewInstance?.evaluateJavascript("if(window.fitTrack) window.fitTrack();", null)
                             }
                         )
                         DropdownMenuItem(
