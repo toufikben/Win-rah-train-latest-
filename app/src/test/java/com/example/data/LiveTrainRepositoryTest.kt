@@ -45,6 +45,27 @@ class LiveTrainRepositoryTest {
     }
 
     @Test
+    fun deterministicBackendUuidMatchesUiLine() = runTest {
+        val repository = LiveTrainRepository(
+            FakeTrainApi(
+                listOf(
+                    TripDto(
+                        id = "trip-uuid",
+                        trainId = "train-uuid",
+                        lineId = "bd566e47-d079-561d-84d1-f66283653b14",
+                        direction = null,
+                        scheduledDeparture = null,
+                        scheduledArrival = null,
+                        status = null,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("trip-uuid" to "train-uuid", repository.getTrackableTripForLine(theniaLine))
+    }
+
+    @Test
     fun trackableTripUsesBackendTrainIdExactly() = runTest {
         val repository = LiveTrainRepository(
             FakeTrainApi(
