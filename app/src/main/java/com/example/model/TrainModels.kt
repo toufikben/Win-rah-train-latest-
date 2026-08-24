@@ -104,23 +104,26 @@ data class LineAlert(
 
 data class ActiveTrain(
     val id: String,
+    val tripId: String?,
     val trainNumber: String,
     val suburbId: String,
     val latitude: Double,
     val longitude: Double,
-    val speedKmh: Float,
-    val nextStation: Station,
-    val prevStation: Station,
-    val distanceToWaitingStationKm: Float,
-    val etaToWaitingStationMinutes: Int,
+    val speedKmh: Float?,
+    val nextStation: Station?,
+    val prevStation: Station?,
+    val distanceToWaitingStationKm: Float?,
+    val etaToWaitingStationMinutes: Int?,
     val isCrowdsourced: Boolean,
     val broadcasterCount: Int,
-    val status: String,
-    val direction: TrainDirection = TrainDirection.INBOUND,
-    val destinationName: String = "الجزائر (آغا)",
-    val platformTrack: String = "الرصيف 1",
+    val status: String?,
+    val direction: TrainDirection?,
+    val destinationName: String?,
+    val platformTrack: String?,
     val isTunnelEstimate: Boolean = false,
-    val crowdReport: CrowdsourcedReport = CrowdsourcedReport()
+    val crowdReport: CrowdsourcedReport? = null,
+    val lastUpdated: String? = null,
+    val truth: String? = null
 )
 
 enum class TransitType(val titleAr: String, val emoji: String, val badgeColorHex: Long) {

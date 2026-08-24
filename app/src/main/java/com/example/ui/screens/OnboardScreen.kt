@@ -81,7 +81,6 @@ fun OnboardScreen(viewModel: TrainViewModel) {
     val corridorDistMeters by viewModel.distanceToRailwayCorridorMeters.collectAsState()
     val selectedSuburb by viewModel.selectedSuburb.collectAsState()
     val destinationAlarm by viewModel.destinationAlarm.collectAsState()
-    val isTunnelSimulation by viewModel.isTunnelSimulationMode.collectAsState()
     val scrollState = rememberScrollState()
 
     var permissionGranted by remember { mutableStateOf(false) }
@@ -116,7 +115,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
             color = Color.White
         )
         Text(
-            text = "تتبع GPS، نظام الأنفاق Dead-Reckoning، ومنبه الوصول الذكي",
+            text = "تتبع GPS الحقيقي، التحقق من مسار السكة، ومنبه الوصول الذكي",
             style = MaterialTheme.typography.bodySmall,
             color = Color(0xFF94A3B8)
         )
@@ -203,44 +202,24 @@ fun OnboardScreen(viewModel: TrainViewModel) {
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // 2. DEAD-RECKONING TUNNEL MODE CARD (FEATURE 2)
+        // The app does not simulate tunnel movement. Missing GPS is shown as unavailable.
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (gpsData.isDeadReckoning) Color(0xFF78350F) else Color(0xFF0F172A)
-            ),
-            border = androidx.compose.foundation.BorderStroke(1.dp, if (gpsData.isDeadReckoning) Color(0xFFF59E0B) else Color(0xFF1E293B))
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "🚇", fontSize = 20.sp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "نظام الملاحة داخل الأنفاق (Dead-Reckoning)",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = if (gpsData.isDeadReckoning) "نظام التقدير بالقصور الذاتي نشط (${gpsData.deadReckoningDurationSec} ثانية)" else "جاهز للاستجابة التلقائية عند فقدان GPS",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (gpsData.isDeadReckoning) Color(0xFFFDE68A) else Color(0xFF94A3B8)
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = isTunnelSimulation,
-                        onCheckedChange = { viewModel.toggleTunnelSimulation(it) }
-                    )
-                }
+            Row(
+                modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "GPS", fontSize = 18.sp, color = Color(0xFF38BDF8))
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = if (gpsData.isGpsActive) "الموقع الحقيقي متاح؛ لا يوجد تقدير اصطناعي عند فقدان الإشارة." else "في انتظار الموقع الحقيقي من الجهاز.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color(0xFFCBD5E1)
+                )
             }
         }
 
@@ -510,8 +489,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             modifier = Modifier
                                 .weight(1f)
                                 .clickable {
-                                    val trainId = "tr_${selectedSuburb.id}_1"
-                                    viewModel.submitCrowdingReport(trainId, level)
+                                    viewModel.submitCrowdingReport(level)
                                 }
                         ) {
                             Column(
@@ -551,8 +529,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             modifier = Modifier
                                 .weight(1f)
                                 .clickable {
-                                    val trainId = "tr_${selectedSuburb.id}_1"
-                                    viewModel.submitDelayReport(trainId, delayLevel)
+                                    viewModel.submitDelayReport(delayLevel)
                                 }
                         ) {
                             Column(

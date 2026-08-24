@@ -3,6 +3,7 @@ package com.example
 import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import dz.winrah.trainradar.R
 import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
 import com.example.data.TrainRepository
@@ -52,7 +53,7 @@ class ExampleRobolectricTest {
     @Test
     fun testViewModelStateAndInteractions() {
         val app = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = TrainViewModel(app)
+        val viewModel = TrainViewModel(app, false)
 
         // Default suburb check
         val defaultSuburb = viewModel.selectedSuburb.value
@@ -73,26 +74,13 @@ class ExampleRobolectricTest {
         viewModel.selectStation(firstStation)
         assertEquals(firstStation.code, viewModel.selectedStation.value.code)
 
-        // Crowdsourcing Delay Submission
-        val testTrainId = "tr_test_123"
-        viewModel.submitDelayReport(testTrainId, DelayLevel.DELAY_5)
-        val reports = viewModel.crowdReportsMap.value
-        assertTrue("Reports should contain submitted delay", reports.containsKey(testTrainId))
-        assertEquals(DelayLevel.DELAY_5, reports[testTrainId]?.delay)
+        // Live reports are submitted to the backend; no fabricated local aggregate is expected.
+        assertTrue(viewModel.crowdReportsMap.value.isEmpty())
 
-        // Crowdsourcing Crowding Submission
-        viewModel.submitCrowdingReport(testTrainId, CrowdingLevel.HIGH)
-        assertEquals(CrowdingLevel.HIGH, viewModel.crowdReportsMap.value[testTrainId]?.crowding)
-
-        // Onboard & Tunnel simulation
+        // Onboard cannot start without a real live train/trip from the backend.
         assertFalse(viewModel.isOnboardMode.value)
-        viewModel.toggleOnboardMode(true)
-        assertTrue(viewModel.isOnboardMode.value)
-
-        viewModel.toggleTunnelSimulation(true)
-        assertTrue(viewModel.isTunnelSimulationMode.value)
-        viewModel.toggleTunnelSimulation(false)
-        assertFalse(viewModel.isTunnelSimulationMode.value)
+        assertFalse(viewModel.toggleOnboardMode(true))
+        assertFalse(viewModel.isOnboardMode.value)
 
         // Destination Alarm
         viewModel.setDestinationAlarm(firstStation, ouedLine.id, 2.0f)

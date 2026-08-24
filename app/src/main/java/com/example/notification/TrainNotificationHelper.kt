@@ -126,7 +126,7 @@ object TrainNotificationHelper {
 
     fun showOngoingTripNotification(context: Context, currentSpeedKmh: Float, nextStationName: String, isTunnel: Boolean) {
         try {
-            val statusText = if (isTunnel) "🚇 داخل النفق (Dead-Reckoning تقدير بالقصور الذاتي)" else "السرعة: ${currentSpeedKmh.toInt()} كم/سا"
+            val statusText = if (isTunnel) "إشارة GPS ضعيفة؛ الموقع غير مؤكد" else "السرعة: ${currentSpeedKmh.toInt()} كم/سا"
             val builder = NotificationCompat.Builder(context, CHANNEL_ONGOING_TRIP)
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setContentTitle("رحلة قطار نشطة • القادمة: $nextStationName")

@@ -85,19 +85,26 @@ fun MapScreen(viewModel: TrainViewModel) {
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
     val primaryTrain = selectedTrain ?: activeTrains.firstOrNull()
+    // When there is no live train, the map remains centered on the selected reference station.
     val trainLat = primaryTrain?.latitude ?: selectedStation.latitude
     val trainLon = primaryTrain?.longitude ?: selectedStation.longitude
-    val trainSpeed = primaryTrain?.speedKmh?.toInt() ?: 75
-    val trainEta = primaryTrain?.etaToWaitingStationMinutes ?: 4
-    val trainDistKm = String.format("%.1f", primaryTrain?.distanceToWaitingStationKm ?: 2.5)
+    val trainSpeed = primaryTrain?.speedKmh?.toInt()?.toString() ?: "غير متوفر"
+    val trainEta = primaryTrain?.etaToWaitingStationMinutes?.toString() ?: "غير متوفر"
+    val trainDistKm = primaryTrain?.distanceToWaitingStationKm?.let { "%.1f".format(it) } ?: "غير متوفر"
 
-    // Push coordinates to the OpenStreetMap Leaflet layer when train moves
-    LaunchedEffect(trainLat, trainLon, primaryTrain?.trainNumber, trainSpeed, trainEta) {
-        val script = """
-            if (window.updateTrainPosition) {
-                window.updateTrainPosition($trainLat, $trainLon, '$trainSpeed', '$trainEta', '${primaryTrain?.trainNumber ?: "قطار مباشر"}', '$trainDistKm');
-            }
-        """.trimIndent()
+    // Push only real live coordinates to the Leaflet layer; never create a fallback train.
+    LaunchedEffect(trainLat, trainLon, primaryTrain?.trainNumber, trainSpeed, trainEta, primaryTrain != null) {
+        val script = if (primaryTrain != null) {
+            """
+                if (window.updateTrainPosition) {
+                    window.updateTrainPosition($trainLat, $trainLon, '$trainSpeed', '$trainEta', '${primaryTrain.trainNumber}', '$trainDistKm');
+                }
+            """.trimIndent()
+        } else {
+            """
+                if (window.removeTrainMarker) window.removeTrainMarker();
+            """.trimIndent()
+        }
         webViewInstance?.evaluateJavascript(script, null)
     }
 
@@ -473,19 +480,23 @@ fun MapScreen(viewModel: TrainViewModel) {
                                         L.marker([s.lat, s.lng], { icon: stationIcon }).addTo(map);
                                     });
 
-                                    // Custom Train Marker (Replacing child pin from image with Train Pin)
-                                    var trainIcon = L.divIcon({
-                                        className: 'custom-train-marker',
-                                        html: '<div class="train-pin-container">' +
-                                              '  <div class="radar-pulse"></div>' +
-                                              '  <div class="train-badge" id="train-label">🚆 قطار مباشر<br><span class="train-badge-sub" id="train-sub">${trainSpeed} كم/سا • ETA: ${trainEta} د</span></div>' +
-                                              '  <div class="train-icon-pin"><span>🚆</span></div>' +
-                                              '</div>',
-                                        iconSize: [110, 80],
-                                        iconAnchor: [55, 60]
-                                    });
+                                                                        // A train marker exists only when the API supplied a real live position.
+                                    var trainMarker = null;
+                                    var hasLiveTrain = ${primaryTrain != null};
+                                    if (hasLiveTrain) {
+                                        var trainIcon = L.divIcon({
+                                            className: 'custom-train-marker',
+                                            html: '<div class="train-pin-container">' +
+                                                  '  <div class="radar-pulse"></div>' +
+                                                  '  <div class="train-badge" id="train-label">🚆 ${primaryTrain?.trainNumber ?: ""}<br><span class="train-badge-sub" id="train-sub">${trainSpeed} كم/سا • ETA: ${trainEta} د</span></div>' +
+                                                  '  <div class="train-icon-pin"><span>🚆</span></div>' +
+                                                  '</div>',
+                                            iconSize: [110, 80],
+                                            iconAnchor: [55, 60]
+                                        });
+                                        trainMarker = L.marker([initialLat, initialLon], { icon: trainIcon }).addTo(map);
+                                    }
 
-                                    var trainMarker = L.marker([initialLat, initialLon], { icon: trainIcon }).addTo(map);
 
                                     window.updateTrainPosition = function(lat, lng, speed, eta, trainName, distKm) {
                                         if (trainMarker) {
@@ -497,6 +508,12 @@ fun MapScreen(viewModel: TrainViewModel) {
                                         }
                                     };
 
+                                    window.removeTrainMarker = function() {
+                                        if (trainMarker) {
+                                            map.removeLayer(trainMarker);
+                                            trainMarker = null;
+                                        }
+                                    };
                                     window.centerOnTrain = function() {
                                         if (trainMarker) {
                                             map.panTo(trainMarker.getLatLng(), { animate: true });
@@ -682,7 +699,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                     color = Color(0xEE0F172A)
                 ) {
                     Text(
-                        text = "GPS: ${String.format("%.4f", trainLat)}, ${String.format("%.4f", trainLon)}",
+                        text = if (primaryTrain != null) "موقع القطار: ${String.format("%.4f", trainLat)}, ${String.format("%.4f", trainLon)}" else "مركز المحطة: ${String.format("%.4f", selectedStation.latitude)}, ${String.format("%.4f", selectedStation.longitude)}",
                         color = Color.White,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,

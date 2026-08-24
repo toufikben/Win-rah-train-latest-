@@ -10,8 +10,27 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  namespace = "dz.winrah.trainradar"
+  compileSdk = 36
+
+  fun buildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+  val configuredApiBaseUrl = providers.gradleProperty("WINRAH_API_BASE_URL").orElse(
+    System.getenv("WINRAH_API_BASE_URL") ?: "https://train-api-uep7.onrender.com/"
+  ).get().trim().let { if (it.endsWith("/")) it else "$it/" }
+  val configuredApiEnvironment = providers.gradleProperty("WINRAH_API_ENVIRONMENT").orElse(
+    System.getenv("WINRAH_API_ENVIRONMENT") ?: "production"
+  ).get().trim().lowercase()
+  val configuredApiWritesEnabled = providers.gradleProperty("WINRAH_API_WRITES_ENABLED").orElse(
+    System.getenv("WINRAH_API_WRITES_ENABLED") ?: "false"
+  ).get().toBooleanStrictOrNull() ?: false
+  require(configuredApiBaseUrl.isNotBlank() && !configuredApiBaseUrl.contains("\n")) {
+    "WINRAH_API_BASE_URL must be a non-empty single-line URL"
+  }
+  require(configuredApiEnvironment in setOf("local", "staging", "production")) {
+    "WINRAH_API_ENVIRONMENT must be local, staging, or production"
+  }
 
   val versionCodeFromEnv = System.getenv("VERSION_CODE")?.toIntOrNull()
   val versionNameFromEnv = System.getenv("VERSION_NAME")?.takeIf { it.isNotBlank() }
@@ -24,12 +43,15 @@ android {
   val releaseKeyPassword = System.getenv("KEY_PASSWORD")
 
   defaultConfig {
-    applicationId = "com.aistudio.trainradar.dzxyz"
+    applicationId = "dz.winrah.trainradar"
     minSdk = 24
     targetSdk = 36
     versionCode = versionCodeFromEnv ?: 1
     versionName = versionNameFromEnv ?: "1.0"
     buildConfigField("String", "GEMINI_API_KEY", "\"AIzaSyPlaceholder\"")
+    buildConfigField("String", "WINRAH_API_BASE_URL", buildConfigString(configuredApiBaseUrl))
+    buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
+    buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -126,7 +148,7 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
+  implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
