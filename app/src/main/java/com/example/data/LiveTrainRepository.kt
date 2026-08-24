@@ -152,17 +152,40 @@ class LiveTrainRepository(
         return normalize(server.nameAr) == normalize(uiStation.name)
     }
 
+    /**
+     * Canonical backend line identities.
+     *
+     * The reference seed stores UUIDs generated from the stable `line:<code>` key,
+     * while older in-memory fixtures use the readable line code. Accepting both
+     * keeps local tests compatible without allowing a name-only match.
+     * Deferred lines are mapped proactively, but remain unavailable until the
+     * backend publishes verified trips for their canonical UUIDs.
+     */
+    private val backendLineIdsByUiLine: Map<String, Set<String>> = mapOf(
+        "thnia_algiers" to setOf(
+            "line-suburb-thenia",
+            "bd566e47-d079-561d-84d1-f66283653b14",
+        ),
+        "zeralda_algiers" to setOf(
+            "line-suburb-zeralda",
+            "e9b9c544-c906-5bc2-83ee-2bf46d97cef9",
+        ),
+        "algiers_affroun" to setOf(
+            "line-suburb-elaffroun",
+            "bd458a9a-5dab-5ee0-8c02-063626e8b0f2",
+        ),
+        "airport_algiers" to setOf(
+            "line-suburb-airport",
+            "38655abf-3a8c-5053-9c9e-fad27fa779dd",
+        ),
+        "thenia_tizi" to setOf(
+            "line-suburb-thenia-tizi",
+            "4955565d-df27-5d12-93da-3bc351899cfd",
+        ),
+    )
+
     private fun matchesWinRahLine(uiLineId: String, backendLineId: String?): Boolean {
-        val accepted = when (uiLineId) {
-            "thnia_algiers" -> setOf("line-suburb-thenia")
-            "zeralda_algiers" -> setOf("line-suburb-zeralda")
-            "algiers_affroun" -> setOf("line-suburb-elaffroun")
-            // The current backend reference data exposes no verified IDs for these two UI lines.
-            // They therefore remain empty until the server publishes matching line IDs.
-            "airport_algiers", "thenia_tizi" -> emptySet()
-            else -> emptySet()
-        }
-        return backendLineId != null && backendLineId in accepted
+        return backendLineId != null && backendLineId in backendLineIdsByUiLine[uiLineId].orEmpty()
     }
 
     private fun normalize(value: String?): String =
