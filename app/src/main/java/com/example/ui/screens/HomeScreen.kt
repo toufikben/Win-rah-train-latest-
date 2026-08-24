@@ -115,6 +115,7 @@ fun HomeScreen(
     val selectedLineAlertModal by viewModel.selectedLineAlertModal.collectAsState()
     val nearbyStations by viewModel.nearbyStations.collectAsState()
     val selectedInterchange by viewModel.selectedInterchange.collectAsState()
+    val isSimulationMode by viewModel.isSimulationMode.collectAsState()
 
     var reportingTrain by remember { mutableStateOf<ActiveTrain?>(null) }
     var showSetAlarmDialog by remember { mutableStateOf(false) }
@@ -272,6 +273,66 @@ fun HomeScreen(
                             contentDescription = "إغلاق",
                             tint = Color.White,
                             modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // LOCAL TRAIN SIMULATION: intentionally separate from live data and cloud writes.
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = if (isSimulationMode) Color(0xFF164E63) else Color(0xFF1E293B)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isSimulationMode) "محاكاة محلية نشطة" else "اختبار قطارات محلي",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        text = if (isSimulationMode) {
+                            "قطاران تجريبيان لكل ضاحية • ETA/سرعة/مسافة • لا إرسال للخادم"
+                        } else {
+                            "اختبر الخريطة والـETA والسرعة والمسافة والإشعارات بأرقام افتراضية"
+                        },
+                        color = Color(0xFFBAE6FD),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isSimulationMode) {
+                        Button(
+                            onClick = { viewModel.sendSimulationNotificationNow() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0E7490)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("إشعار", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Button(
+                        onClick = { viewModel.setSimulationMode(!isSimulationMode) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isSimulationMode) Color(0xFFDC2626) else Color(0xFF0284C7)
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = if (isSimulationMode) "إيقاف" else "تشغيل",
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -765,10 +826,11 @@ fun HomeScreen(
                         Button(onClick = { viewModel.refreshLiveTrains() }) { Text("إعادة المحاولة") }
                     }
                 }
-            } else if (activeTrains.isEmpty()) {
-                item {
-                    Text(
-                        text = "لا يوجد بث حي على هذا الخط حالياً. فعّل وضع على متن القطار للمساهمة.",
+                                } else if (activeTrains.isEmpty()) {
+                        item {
+                            Text(
+                                text = if (isSimulationMode) "لم تُنشأ محاكاة لهذا الخط." else "لا يوجد بث حي على هذا الخط حالياً. فعّل وضع على متن القطار للمساهمة.",
+
                         modifier = Modifier.fillMaxWidth().padding(20.dp),
                         color = Color(0xFF94A3B8),
                         textAlign = TextAlign.Center

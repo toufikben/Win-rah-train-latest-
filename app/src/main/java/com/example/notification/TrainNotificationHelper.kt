@@ -17,10 +17,12 @@ object TrainNotificationHelper {
     const val CHANNEL_DESTINATION_ALARM = "train_destination_alarm_channel"
     const val CHANNEL_APPROACHING = "train_approaching_channel"
     const val CHANNEL_ONGOING_TRIP = "train_ongoing_trip_channel"
+    const val CHANNEL_SIMULATION = "train_simulation_channel"
 
     const val NOTIFICATION_ID_ALARM = 1001
     const val NOTIFICATION_ID_APPROACHING = 1002
     const val NOTIFICATION_ID_ONGOING = 1003
+    const val NOTIFICATION_ID_SIMULATION = 1004
 
     fun initNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -63,9 +65,19 @@ object TrainNotificationHelper {
                 setShowBadge(false)
             }
 
+            val simulationChannel = NotificationChannel(
+                CHANNEL_SIMULATION,
+                "محاكاة قطارات WinRah (تجريبية)",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "إشعارات محلية لقطارات افتراضية؛ ليست بيانات تشغيلية أو حية"
+                enableVibration(true)
+            }
+
             notificationManager.createNotificationChannel(alarmChannel)
             notificationManager.createNotificationChannel(approachingChannel)
             notificationManager.createNotificationChannel(ongoingChannel)
+            notificationManager.createNotificationChannel(simulationChannel)
         }
     }
 
@@ -121,6 +133,36 @@ object TrainNotificationHelper {
             with(NotificationManagerCompat.from(context)) {
                 notify(NOTIFICATION_ID_APPROACHING, builder.build())
             }
+        } catch (_: Exception) {}
+    }
+
+    fun showSimulationNotification(
+        context: Context,
+        lineName: String,
+        stationName: String,
+        etaMinutes: Int,
+        speedKmh: Float,
+        distanceKm: Float
+    ) {
+        try {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                1,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val builder = NotificationCompat.Builder(context, CHANNEL_SIMULATION)
+                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setContentTitle("محاكاة قطار • $lineName")
+                .setContentText("محطة الانتظار: $stationName • ETA: $etaMinutes د • ${speedKmh.toInt()} كم/سا • ${String.format("%.1f", distanceKm)} كم")
+                .setStyle(NotificationCompat.BigTextStyle().bigText("بيانات تجريبية محلية فقط — لا تمثل قطارًا حيًا أو موعدًا رسميًا.\nمحطة الانتظار: $stationName\nETA محتمل: $etaMinutes دقيقة\nالسرعة المحاكاة: ${speedKmh.toInt()} كم/سا\nالمسافة: ${String.format("%.1f", distanceKm)} كم"))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_SIMULATION, builder.build())
         } catch (_: Exception) {}
     }
 
