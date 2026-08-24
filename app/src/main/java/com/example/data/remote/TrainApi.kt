@@ -8,6 +8,7 @@ import com.example.data.remote.dto.ReportRequest
 import com.example.data.remote.dto.StationDto
 import com.example.data.remote.dto.TripDto
 import com.example.data.remote.dto.TripStopDto
+import com.example.data.remote.dto.RailwaySegmentsResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -26,6 +27,9 @@ interface TrainApi {
 
     @GET("trains")
     suspend fun getLiveTrains(): List<LiveTrainDto>
+
+    @GET("map/railway-segments.geojson")
+    suspend fun getRailwaySegments(): RailwaySegmentsResponse
 
     @GET("nearby-trains")
     suspend fun getNearbyTrains(

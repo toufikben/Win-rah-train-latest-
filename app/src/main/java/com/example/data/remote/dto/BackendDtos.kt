@@ -117,3 +117,26 @@ data class ReportRequest(
     @Json(name = "report_type") val reportType: String,
     @Json(name = "description") val description: String?
 )
+
+@JsonClass(generateAdapter = true)
+data class RailwaySegmentsResponse(
+    @Json(name = "features") val features: List<RailwaySegmentFeature> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class RailwaySegmentFeature(
+    @Json(name = "geometry") val geometry: RailwaySegmentGeometry?,
+    @Json(name = "properties") val properties: RailwaySegmentProperties?
+)
+
+@JsonClass(generateAdapter = true)
+data class RailwaySegmentGeometry(
+    @Json(name = "type") val type: String?,
+    @Json(name = "coordinates") val coordinates: List<List<Double>>?
+)
+
+@JsonClass(generateAdapter = true)
+data class RailwaySegmentProperties(
+    @Json(name = "line_id") val lineId: String?,
+    @Json(name = "source_kind") val sourceKind: String?
+)
