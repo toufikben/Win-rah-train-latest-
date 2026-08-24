@@ -66,6 +66,34 @@ class LiveTrainRepository(
         api.submitReport(request)
     }
 
+    /** Resolve a local UI station to the canonical UUID returned by the backend. */
+    suspend fun canonicalStationId(station: Station): String? {
+        if (stationsById.isEmpty()) refreshReferenceData()
+        stationsById[station.id]?.let { return it.id }
+
+        stationsById.values.firstOrNull { server ->
+            listOf(server.nameAr, server.nameFr, server.nameEn).any { name ->
+                normalize(name) == normalize(station.name) || normalize(name) == normalize(station.code)
+            }
+        }?.let { return it.id }
+
+        // Reference coordinates differ slightly between the two catalogs. Use a
+        // conservative proximity fallback, never an arbitrary station ID.
+        return stationsById.values
+            .map { server ->
+                server to GeoUtils.calculateDistanceKm(
+                    station.latitude,
+                    station.longitude,
+                    server.latitude,
+                    server.longitude,
+                )
+            }
+            .minByOrNull { it.second }
+            ?.takeIf { it.second <= 2.0 }
+            ?.first
+            ?.id
+    }
+
     private fun toActiveTrain(
         dto: LiveTrainDto,
         line: SuburbLine,

@@ -434,7 +434,7 @@ class TrainViewModel private constructor(
                     ReportRequest(
                         trainId = trainId,
                         tripId = tripId,
-                        stationId = _selectedStation.value.id,
+                        stationId = liveTrainRepository.canonicalStationId(_selectedStation.value),
                         reportType = reportType,
                         description = description
                     )

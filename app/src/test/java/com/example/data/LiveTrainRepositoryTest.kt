@@ -86,8 +86,32 @@ class LiveTrainRepositoryTest {
         assertEquals("trip-uuid" to "train-uuid", repository.getTrackableTripForLine(theniaLine))
     }
 
-    private class FakeTrainApi(private val trips: List<TripDto>) : TrainApi {
-        override suspend fun getStations(): List<StationDto> = emptyList()
+    @Test
+    fun localStationResolvesToCanonicalBackendUuid() = runTest {
+        val repository = LiveTrainRepository(
+            FakeTrainApi(
+                trips = emptyList(),
+                stations = listOf(
+                    StationDto(
+                        id = "station-uuid",
+                        nameAr = "الثنية",
+                        nameFr = "Thenia",
+                        nameEn = "Thenia",
+                        latitude = 36.725,
+                        longitude = 3.557,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("station-uuid", repository.canonicalStationId(TrainRepository.suburbLines.first().stations.first()))
+    }
+
+    private class FakeTrainApi(
+        private val trips: List<TripDto>,
+        private val stations: List<StationDto> = emptyList(),
+    ) : TrainApi {
+        override suspend fun getStations(): List<StationDto> = stations
         override suspend fun getTrips(lineId: String?): List<TripDto> = trips
         override suspend fun getTripStops(tripId: String): List<TripStopDto> = emptyList()
         override suspend fun getLiveTrains(): List<LiveTrainDto> = emptyList()
