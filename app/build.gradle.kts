@@ -52,6 +52,7 @@ android {
     buildConfigField("String", "WINRAH_API_BASE_URL", buildConfigString(configuredApiBaseUrl))
     buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
     buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
+    manifestPlaceholders["usesCleartextTraffic"] = configuredApiEnvironment == "local"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
