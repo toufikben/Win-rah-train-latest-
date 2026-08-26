@@ -80,6 +80,9 @@ fun OnboardScreen(viewModel: TrainViewModel) {
     val verificationStatus by viewModel.verificationStatus.collectAsState()
     val corridorDistMeters by viewModel.distanceToRailwayCorridorMeters.collectAsState()
     val selectedSuburb by viewModel.selectedSuburb.collectAsState()
+    val selectedStation by viewModel.selectedStation.collectAsState()
+    val feedbackMsg by viewModel.userFeedbackMessage.collectAsState()
+    val selectedInterchange by viewModel.selectedInterchange.collectAsState()
     val destinationAlarm by viewModel.destinationAlarm.collectAsState()
     val scrollState = rememberScrollState()
 
@@ -93,6 +96,8 @@ fun OnboardScreen(viewModel: TrainViewModel) {
         permissionGranted = fineGranted || coarseGranted
         if (permissionGranted) {
             viewModel.toggleOnboardMode(true)
+        } else {
+            viewModel.setUserFeedback("لم يتم تفعيل المستشعر: يجب السماح بصلاحية الموقع أولًا.")
         }
     }
 
@@ -119,6 +124,71 @@ fun OnboardScreen(viewModel: TrainViewModel) {
             style = MaterialTheme.typography.bodySmall,
             color = Color(0xFF94A3B8)
         )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // TRANSIT GUIDE MOVED FROM RADAR: presentation only; ViewModel logic is unchanged.
+        val stationInterchange = com.example.data.TrainRepository.getInterchangeForStation(selectedStation.code)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF1E1B4B).copy(alpha = 0.9f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4338CA)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.openInterchangeModal(selectedStation.code) }
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Text(text = "🚊🚇🚌🚕", fontSize = 15.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = if (stationInterchange != null) "مواصلات وربط: ${selectedStation.name}" else "دليل النقل والربط: ${selectedStation.name}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFA5B4FC)
+                        )
+                        Text(
+                            text = if (stationInterchange != null) "${stationInterchange.connections.size} وسائط ربط" else "استكشف وسائل النقل المتاحة عند النزول",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFC7D2FE),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+                Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF4F46E5)) {
+                    Text(
+                        text = "دليل المواصلات ❯",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
+        feedbackMsg?.let { message ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12324A)),
+                onClick = { viewModel.clearUserFeedback() }
+            ) {
+                Text(
+                    text = message,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -617,5 +687,19 @@ fun OnboardScreen(viewModel: TrainViewModel) {
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+
+    selectedInterchange?.let { interchange ->
+        StationInterchangeModalDialog(
+            interchange = interchange,
+            onSetAlarm = {
+                val station = com.example.data.TrainRepository.suburbLines
+                    .flatMap { it.stations }
+                    .find { it.code == interchange.stationCode }
+                if (station != null) viewModel.setDestinationAlarm(station, alertDistanceKm = 1.5f)
+                viewModel.closeInterchangeModal()
+            },
+            onDismiss = { viewModel.closeInterchangeModal() }
+        )
     }
 }

@@ -686,62 +686,6 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // 6. MULTI-MODAL INTERCHANGE & TRANSIT HUB BANNER FOR SELECTED STATION
-        val stationInterchange = com.example.data.TrainRepository.getInterchangeForStation(selectedStation.code)
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = Color(0xFF1E1B4B).copy(alpha = 0.9f), // Deep rich indigo
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4338CA)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { viewModel.openInterchangeModal(selectedStation.code) }
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(text = "🚊🚇🚌🚕", fontSize = 15.sp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = if (stationInterchange != null) "مواصلات وربط: ${selectedStation.name}" else "دليل النقل والربط: ${selectedStation.name}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFA5B4FC)
-                        )
-                        Text(
-                            text = if (stationInterchange != null) "${stationInterchange.connections.size} وسائط ربط (مترو / ترامواي / حافلات / طاكسي)" else "انقر لاستكشاف وسائل النقل وسيارات الأجرة المتاحة عند النزول",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFC7D2FE),
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFF4F46E5)
-                ) {
-                    Text(
-                        text = "دليل المواصلات ❯",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                        fontSize = 10.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         // 4. DIRECTION FILTER BAR (FEATURE 4)
         Row(
             modifier = Modifier.fillMaxWidth(),

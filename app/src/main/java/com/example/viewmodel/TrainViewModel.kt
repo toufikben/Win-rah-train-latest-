@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
 import com.example.data.LiveTrainRepository
+import dz.winrah.trainradar.BuildConfig
 import com.example.data.TrackGeometry
 import com.example.data.TrainRepository
 import com.example.data.remote.dto.ObservationRequest
@@ -60,7 +61,11 @@ class TrainViewModel private constructor(
     private val enableLivePolling: Boolean,
     private val liveTrainRepository: LiveTrainRepository
 ) : AndroidViewModel(app) {
-    constructor(app: Application) : this(app, true, LiveTrainRepository())
+    constructor(app: Application) : this(
+        app,
+        BuildConfig.WINRAH_API_ENVIRONMENT != "local",
+        LiveTrainRepository()
+    )
     constructor(app: Application, enableLivePolling: Boolean) : this(app, enableLivePolling, LiveTrainRepository())
 
     private val locationTracker = LocationTracker(app)
@@ -398,6 +403,10 @@ class TrainViewModel private constructor(
 
     fun clearApproachingAlert() {
         _approachingAlert.value = null
+    }
+
+    fun setUserFeedback(message: String) {
+        _userFeedbackMessage.value = message
     }
 
     fun clearUserFeedback() {
