@@ -107,6 +107,8 @@ class TrainViewModel private constructor(
 
     private val _isOnboardMode = MutableStateFlow(false)
     val isOnboardMode: StateFlow<Boolean> = _isOnboardMode.asStateFlow()
+    private val _isOnboardActivationPending = MutableStateFlow(false)
+    val isOnboardActivationPending: StateFlow<Boolean> = _isOnboardActivationPending.asStateFlow()
 
     private val _distanceToRailwayCorridorMeters = MutableStateFlow(0.0)
     val distanceToRailwayCorridorMeters: StateFlow<Double> = _distanceToRailwayCorridorMeters.asStateFlow()
@@ -121,6 +123,10 @@ class TrainViewModel private constructor(
     // 2. CROWDSOURCED DELAY & CROWDING REPORTS
     private val _crowdReportsMap = MutableStateFlow<Map<String, CrowdsourcedReport>>(emptyMap())
     val crowdReportsMap: StateFlow<Map<String, CrowdsourcedReport>> = _crowdReportsMap.asStateFlow()
+    private val _selectedCrowdingReport = MutableStateFlow<CrowdingLevel?>(null)
+    val selectedCrowdingReport: StateFlow<CrowdingLevel?> = _selectedCrowdingReport.asStateFlow()
+    private val _selectedDelayReport = MutableStateFlow<DelayLevel?>(null)
+    val selectedDelayReport: StateFlow<DelayLevel?> = _selectedDelayReport.asStateFlow()
 
     // 3. FAVORITES AND QUICK WIDGETS
     private val _favoriteStations = MutableStateFlow<List<FavoriteStation>>(emptyList())
@@ -269,6 +275,7 @@ class TrainViewModel private constructor(
         if (!enable) {
             val binding = _monitorBinding.value
             _monitorBinding.value = null
+            _isOnboardActivationPending.value = false
             locationTracker.stopLocationUpdates()
             TrainNotificationHelper.clearOngoingNotification(app)
             _isOnboardMode.value = false
@@ -281,7 +288,10 @@ class TrainViewModel private constructor(
             return true
         }
 
+        if (_isOnboardActivationPending.value) return true
+        _isOnboardActivationPending.value = true
         if (!enableLivePolling) {
+            _isOnboardActivationPending.value = false
             _userFeedbackMessage.value = "وضع الاختبار المحلي لا يشغّل البث الشبكي."
             return false
         }
@@ -311,6 +321,7 @@ class TrainViewModel private constructor(
                     trainId = session.trainId
                 )
                 _isOnboardMode.value = true
+                _isOnboardActivationPending.value = false
                 _userFeedbackMessage.value = "تم بدء البث الحقيقي من جهازك بعد إنشاء جلسة المراقبة."
             } catch (error: Exception) {
                 if (createdSessionId != null) {
@@ -318,6 +329,7 @@ class TrainViewModel private constructor(
                 }
                 _monitorBinding.value = null
                 _isOnboardMode.value = false
+                _isOnboardActivationPending.value = false
                 locationTracker.stopLocationUpdates()
                 _verificationStatus.value = VerificationStatus.WAITING_GPS
                 _userFeedbackMessage.value = if (error.message == "location_unavailable") {
@@ -437,6 +449,8 @@ class TrainViewModel private constructor(
     // 2. CROWDSOURCED DELAY & CROWDING REPORTS
     // ==========================================
     fun submitCrowdingReport(trainId: String, crowding: CrowdingLevel) {
+        if (_selectedCrowdingReport.value == crowding) return
+        _selectedCrowdingReport.value = crowding
         submitEvidenceReport(
             trainId = trainId,
             reportType = "OTHER",
@@ -445,6 +459,8 @@ class TrainViewModel private constructor(
     }
 
     fun submitDelayReport(trainId: String, delay: DelayLevel) {
+        if (_selectedDelayReport.value == delay) return
+        _selectedDelayReport.value = delay
         submitEvidenceReport(
             trainId = trainId,
             reportType = "DELAYED",
@@ -453,6 +469,8 @@ class TrainViewModel private constructor(
     }
 
     fun submitCrowdingReport(crowding: CrowdingLevel) {
+        if (_selectedCrowdingReport.value == crowding) return
+        _selectedCrowdingReport.value = crowding
         submitBoundEvidenceReport(
             reportType = "OTHER",
             description = "إفادة مستخدم: ${crowding.titleAr}"
@@ -460,6 +478,8 @@ class TrainViewModel private constructor(
     }
 
     fun submitDelayReport(delay: DelayLevel) {
+        if (_selectedDelayReport.value == delay) return
+        _selectedDelayReport.value = delay
         submitBoundEvidenceReport(
             reportType = "DELAYED",
             description = "إفادة مستخدم: ${delay.titleAr}"

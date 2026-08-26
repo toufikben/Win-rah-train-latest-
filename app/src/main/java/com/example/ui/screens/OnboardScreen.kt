@@ -76,6 +76,9 @@ import com.example.viewmodel.TrainViewModel
 @Composable
 fun OnboardScreen(viewModel: TrainViewModel) {
     val isOnboard by viewModel.isOnboardMode.collectAsState()
+    val isOnboardActivationPending by viewModel.isOnboardActivationPending.collectAsState()
+    val selectedCrowdingReport by viewModel.selectedCrowdingReport.collectAsState()
+    val selectedDelayReport by viewModel.selectedDelayReport.collectAsState()
     val gpsData by viewModel.gpsData.collectAsState()
     val verificationStatus by viewModel.verificationStatus.collectAsState()
     val corridorDistMeters by viewModel.distanceToRailwayCorridorMeters.collectAsState()
@@ -86,16 +89,16 @@ fun OnboardScreen(viewModel: TrainViewModel) {
     val destinationAlarm by viewModel.destinationAlarm.collectAsState()
     val scrollState = rememberScrollState()
 
-    var permissionGranted by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
-        permissionGranted = fineGranted || coarseGranted
+        val permissionGranted = fineGranted || coarseGranted
         if (permissionGranted) {
             viewModel.toggleOnboardMode(true)
+            viewModel.setUserFeedback("تم السماح بالموقع. جارٍ إنشاء جلسة البث المباشر...")
         } else {
             viewModel.setUserFeedback("لم يتم تفعيل المستشعر: يجب السماح بصلاحية الموقع أولًا.")
         }
@@ -245,14 +248,16 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "تفعيل بث المستشعر المباشر",
+                                            Text(
+                            text = if (isOnboardActivationPending) "جارٍ تفعيل بث المستشعر..." else "تفعيل بث المستشعر المباشر",
+
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White
                     )
                     Switch(
-                        checked = isOnboard,
+                        checked = isOnboard || isOnboardActivationPending,
+                        enabled = !isOnboardActivationPending,
                         onCheckedChange = { enable ->
                             if (enable) {
                                 permissionLauncher.launch(
@@ -552,13 +557,14 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     CrowdingLevel.values().forEach { level ->
+                        val isSelected = selectedCrowdingReport == level
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF1E293B),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(level.colorHex)),
+                            color = if (isSelected) Color(level.colorHex).copy(alpha = 0.28f) else Color(0xFF1E293B),
+                            border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, Color(level.colorHex)),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable {
+                                .clickable(enabled = !isSelected) {
                                     viewModel.submitCrowdingReport(level)
                                 }
                         ) {
@@ -568,10 +574,11 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             ) {
                                 Text(text = level.emoji, fontSize = 18.sp)
                                 Text(
-                                    text = level.name,
+                                    text = if (isSelected) "✓ ${level.name}" else level.name,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    color = if (isSelected) Color(level.colorHex) else Color.White,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
@@ -593,12 +600,14 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     DelayLevel.values().forEach { delayLevel ->
+                        val isSelected = selectedDelayReport == delayLevel
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF1E293B),
+                            color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.30f) else Color(0xFF1E293B),
+                            border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF60A5FA) else Color(0xFF475569)),
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable {
+                                .clickable(enabled = !isSelected) {
                                     viewModel.submitDelayReport(delayLevel)
                                 }
                         ) {
@@ -608,9 +617,10 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             ) {
                                 Text(text = delayLevel.emoji, fontSize = 16.sp)
                                 Text(
-                                    text = delayLevel.titleAr,
+                                    text = if (isSelected) "✓ ${delayLevel.titleAr}" else delayLevel.titleAr,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFFCBD5E1),
+                                    color = if (isSelected) Color(0xFFBFDBFE) else Color(0xFFCBD5E1),
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     textAlign = TextAlign.Center
                                 )
                             }
