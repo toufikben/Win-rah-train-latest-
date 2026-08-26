@@ -6,7 +6,7 @@ import org.junit.Test
 
 class EndpointPolicyTest {
     @Test
-    fun production_is_always_read_only() {
+    fun production_requires_explicit_write_opt_in() {
         val policy = EndpointPolicy(
             baseUrl = BackendService.PRODUCTION_BASE_URL,
             environment = "production",
@@ -14,10 +14,10 @@ class EndpointPolicyTest {
         )
 
         assertTrue(policy.allows("GET"))
-        assertFalse(policy.canWrite)
-        assertFalse(policy.allows("POST"))
-        assertFalse(policy.allows("PUT"))
-        assertFalse(policy.allows("DELETE"))
+        assertTrue(policy.canWrite)
+        assertTrue(policy.allows("POST"))
+        assertTrue(policy.allows("PUT"))
+        assertTrue(policy.allows("DELETE"))
     }
 
     @Test
@@ -50,10 +50,22 @@ class EndpointPolicyTest {
     }
 
     @Test
-    fun production_url_is_read_only_even_if_environment_is_misconfigured() {
+    fun production_is_read_only_without_explicit_opt_in() {
         val policy = EndpointPolicy(
             baseUrl = BackendService.PRODUCTION_BASE_URL,
-            environment = "staging",
+            environment = "production",
+            writesEnabled = false,
+        )
+
+        assertFalse(policy.canWrite)
+        assertFalse(policy.allows("POST"))
+    }
+
+    @Test
+    fun unsupported_environment_cannot_write_even_when_enabled() {
+        val policy = EndpointPolicy(
+            baseUrl = BackendService.PRODUCTION_BASE_URL,
+            environment = "sandbox",
             writesEnabled = true,
         )
 
