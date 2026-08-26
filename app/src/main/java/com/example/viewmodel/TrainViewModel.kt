@@ -191,6 +191,7 @@ class TrainViewModel private constructor(
 
     private var lastWhistleAlertTime = 0L
     private var lastAlarmRingTime = 0L
+    private val announcedArrivalKeys = mutableSetOf<String>()
 
     private var liveRefreshJob: Job? = null
     private var simulationStartedAtSeconds = System.currentTimeMillis() / 1000L
@@ -886,9 +887,36 @@ class TrainViewModel private constructor(
         checkApproachingTrain()
     }
 
+    private fun checkTrainArrival(train: ActiveTrain, waitingStation: Station) {
+        val distanceKm = train.distanceToWaitingStationKm ?: return
+        val normalizedStatus = train.status?.trim()?.uppercase()
+        val isAtSelectedStation = distanceKm <= 0.15f || normalizedStatus in setOf("ARRIVED", "AT_STATION", "ARRIVAL")
+        val arrivalKey = "${train.tripId ?: train.id}:${waitingStation.code}"
+
+        if (!isAtSelectedStation) {
+            announcedArrivalKeys.remove(arrivalKey)
+            return
+        }
+        if (arrivalKey in announcedArrivalKeys) return
+
+        val didNotify = if (_isBackgroundNotificationEnabled.value) {
+            TrainNotificationHelper.showTrainArrivalNotification(app, train.trainNumber, waitingStation.name)
+        } else {
+            false
+        }
+        if (didNotify) {
+            announcedArrivalKeys += arrivalKey
+            _approachingAlert.value = "وصل ${train.trainNumber} إلى محطة (${waitingStation.name})."
+        }
+    }
+
     private fun checkApproachingTrain() {
         val waitingStation = _selectedStation.value
         val thresholdKm = _alertDistanceThresholdKm.value
+
+        _activeTrains.value.forEach { train ->
+            checkTrainArrival(train, waitingStation)
+        }
 
         val approaching = _activeTrains.value.find { train ->
             (train.distanceToWaitingStationKm?.let { it <= thresholdKm } == true) ||

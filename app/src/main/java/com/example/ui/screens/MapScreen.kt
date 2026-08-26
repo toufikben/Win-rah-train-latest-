@@ -571,8 +571,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                                     var followTrain = false;
                                     var lastTrainPosition = null;
                                     function setFollowTrain(enabled) {
-                                        followTrain = enabled;
-                                        if (enabled && window.centerOnTrain) window.centerOnTrain();
+                                        followTrain = !!enabled;
+                                        if (followTrain && typeof window.centerOnTrain === 'function') window.centerOnTrain();
                                     }
                                     window.onerror = function(message, source, line, column) {
                                         showMapStatus('خطأ JavaScript: ' + message + ' @' + line);
@@ -721,14 +721,22 @@ fun MapScreen(viewModel: TrainViewModel) {
                                     window.setFollowTrain = function(enabled) { setFollowTrain(enabled); };
                                     window.centerOnTrain = function() {
                                         if (trainMarker) {
-                                            map.panTo(trainMarker.getLatLng(), { animate: true });
+                                            var trainLatLng = trainMarker.getLatLng();
+                                            var targetZoom = Math.max(map.getZoom(), 15);
+                                            map.setView(trainLatLng, targetZoom, { animate: true });
                                         } else if (trackPoints.length >= 2) {
-                                            map.fitBounds(trackLine.getBounds(), { padding: [24, 24] });
+                                            map.fitBounds(trackLine.getBounds(), { padding: [24, 24], maxZoom: 14, animate: true });
+                                        } else if (stations.length > 0) {
+                                            map.setView([stations[0].lat, stations[0].lng], Math.max(map.getZoom(), 13), { animate: true });
                                         }
                                     };
                                     window.fitTrack = function() {
+                                        followTrain = false;
                                         if (trackPoints.length >= 2) {
-                                            map.fitBounds(trackLine.getBounds(), { padding: [24, 24] });
+                                            map.fitBounds(trackLine.getBounds(), { padding: [24, 24], maxZoom: 13, animate: true });
+                                        } else if (stations.length > 0) {
+                                            var stationBounds = L.latLngBounds(stations.map(function(s) { return [s.lat, s.lng]; }));
+                                            map.fitBounds(stationBounds, { padding: [24, 24], maxZoom: 13, animate: true });
                                         }
                                     };
 
@@ -773,8 +781,8 @@ fun MapScreen(viewModel: TrainViewModel) {
 
                 Column(
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 12.dp),
+                            .align(Alignment.CenterEnd)
+                        .padding(end = 10.dp, bottom = 172.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -785,7 +793,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                             .clip(CircleShape)
                             .clickable {
                                 isFollowingTrain = !isFollowingTrain
-                                webViewInstance?.evaluateJavascript("if(window.setFollowTrain) window.setFollowTrain($isFollowingTrain);", null)
+                                webViewInstance?.evaluateJavascript("(function(){if(window.setFollowTrain){window.setFollowTrain($isFollowingTrain);}else{console.warn('خريطة التتبع غير جاهزة');}})();", null)
                             },
                         color = if (isFollowingTrain) Color(0xFF2563EB) else Color(0xFF059669),
                         shadowElevation = 6.dp
@@ -807,7 +815,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                             .clip(CircleShape)
                             .clickable {
                                 isFollowingTrain = false
-                                webViewInstance?.evaluateJavascript("if(window.setFollowTrain) window.setFollowTrain(false); if(window.fitTrack) window.fitTrack();", null)
+                                webViewInstance?.evaluateJavascript("(function(){if(window.setFollowTrain)window.setFollowTrain(false);if(window.fitTrack)window.fitTrack();else console.warn('خريطة المسار غير جاهزة');})();", null)
                             },
                         color = Color(0xDD1E293B),
                         shadowElevation = 4.dp
@@ -823,7 +831,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                             .size(42.dp)
                             .clip(CircleShape)
                             .clickable {
-                                webViewInstance?.evaluateJavascript("if(window.centerOnTrain) window.centerOnTrain();", null)
+                                webViewInstance?.evaluateJavascript("(function(){if(window.centerOnTrain)window.centerOnTrain();else console.warn('علامة القطار غير جاهزة');})();", null)
                             },
                         color = Color(0xFF059669),
                         shadowElevation = 6.dp
@@ -965,12 +973,12 @@ fun MapScreen(viewModel: TrainViewModel) {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(10.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0xF20F172A),
+                        .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xEC0F172A),
                     shadowElevation = 8.dp
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -980,7 +988,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                                 Text(
                                     text = primaryTrain?.trainNumber ?: "مراقبة الخط",
                                     color = Color.White,
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
@@ -1003,7 +1011,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1014,7 +1022,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                             TrainInfoMetric("المسافة", if (primaryTrain?.distanceToWaitingStationKm != null) "${trainDistKm} كم" else "—")
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1031,7 +1039,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                                 modifier = Modifier.clickable {
                                     if (primaryTrain != null) {
                                         isFollowingTrain = !isFollowingTrain
-                                        webViewInstance?.evaluateJavascript("if(window.setFollowTrain) window.setFollowTrain($isFollowingTrain);", null)
+                                        webViewInstance?.evaluateJavascript("(function(){if(window.setFollowTrain)window.setFollowTrain($isFollowingTrain);else console.warn('خريطة التتبع غير جاهزة');})();", null)
                                     }
                                 },
                                 shape = RoundedCornerShape(12.dp),
@@ -1042,7 +1050,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                                     color = Color.White,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                                 )
                             }
                         }

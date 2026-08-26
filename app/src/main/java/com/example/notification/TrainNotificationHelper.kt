@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
@@ -18,11 +19,13 @@ object TrainNotificationHelper {
     const val CHANNEL_APPROACHING = "train_approaching_channel"
     const val CHANNEL_ONGOING_TRIP = "train_ongoing_trip_channel"
     const val CHANNEL_SIMULATION = "train_simulation_channel"
+    const val CHANNEL_ARRIVAL = "train_arrival_channel"
 
     const val NOTIFICATION_ID_ALARM = 1001
     const val NOTIFICATION_ID_APPROACHING = 1002
     const val NOTIFICATION_ID_ONGOING = 1003
     const val NOTIFICATION_ID_SIMULATION = 1004
+    const val NOTIFICATION_ID_ARRIVAL = 1005
 
     fun initNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -65,6 +68,16 @@ object TrainNotificationHelper {
                 setShowBadge(false)
             }
 
+            val arrivalChannel = NotificationChannel(
+                CHANNEL_ARRIVAL,
+                "وصول القطار إلى المحطة 🚉",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "تنبيه عند وصول القطار فعليًا إلى محطة الانتظار المختارة"
+                enableVibration(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+            }
+
             val simulationChannel = NotificationChannel(
                 CHANNEL_SIMULATION,
                 "محاكاة قطارات WinRah (تجريبية)",
@@ -78,11 +91,19 @@ object TrainNotificationHelper {
             notificationManager.createNotificationChannel(approachingChannel)
             notificationManager.createNotificationChannel(ongoingChannel)
             notificationManager.createNotificationChannel(simulationChannel)
+            notificationManager.createNotificationChannel(arrivalChannel)
         }
+    }
+
+    private fun canPostNotifications(context: Context): Boolean {
+        val enabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        if (!enabled) Log.w("WinRahNotifications", "Notifications are disabled by the user")
+        return enabled
     }
 
     fun showDestinationAlarmNotification(context: Context, station: Station, remainingKm: Float) {
         try {
+            if (!canPostNotifications(context)) return
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -112,6 +133,7 @@ object TrainNotificationHelper {
 
     fun showApproachingNotification(context: Context, trainTitle: String, stationName: String, etaMinutes: Int, distKm: Float) {
         try {
+            if (!canPostNotifications(context)) return
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -134,6 +156,36 @@ object TrainNotificationHelper {
                 notify(NOTIFICATION_ID_APPROACHING, builder.build())
             }
         } catch (_: Exception) {}
+    }
+
+    fun showTrainArrivalNotification(context: Context, trainTitle: String, stationName: String): Boolean {
+        try {
+            if (!canPostNotifications(context)) return false
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                2,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val builder = NotificationCompat.Builder(context, CHANNEL_ARRIVAL)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("🚉 وصل القطار إلى محطة $stationName")
+                .setContentText("$trainTitle وصل إلى محطة الانتظار المختارة")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .setVibrate(longArrayOf(0, 400, 180, 400))
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_ARRIVAL, builder.build())
+            return true
+        } catch (error: Exception) {
+            Log.e("WinRahNotifications", "Unable to post arrival notification", error)
+            return false
+        }
     }
 
     fun showSimulationNotification(
