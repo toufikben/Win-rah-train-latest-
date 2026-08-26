@@ -28,8 +28,8 @@ android {
   require(configuredApiBaseUrl.isNotBlank() && !configuredApiBaseUrl.contains("\n")) {
     "WINRAH_API_BASE_URL must be a non-empty single-line URL"
   }
-  require(configuredApiEnvironment in setOf("local", "staging", "production")) {
-    "WINRAH_API_ENVIRONMENT must be local, staging, or production"
+  require(configuredApiEnvironment in setOf("staging", "production")) {
+    "WINRAH_API_ENVIRONMENT must be staging or production"
   }
 
   val versionCodeFromEnv = System.getenv("VERSION_CODE")?.toIntOrNull()
@@ -52,7 +52,7 @@ android {
     buildConfigField("String", "WINRAH_API_BASE_URL", buildConfigString(configuredApiBaseUrl))
     buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
     buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
-    manifestPlaceholders["usesCleartextTraffic"] = configuredApiEnvironment == "local"
+    manifestPlaceholders["usesCleartextTraffic"] = false
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

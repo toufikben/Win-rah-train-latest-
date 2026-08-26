@@ -81,7 +81,6 @@ fun MapScreen(viewModel: TrainViewModel) {
     val trackGeometry by viewModel.trackGeometry.collectAsState()
     val trackGeometryLoading by viewModel.trackGeometryLoading.collectAsState()
     val trackGeometryError by viewModel.trackGeometryError.collectAsState()
-    val isSimulationMode by viewModel.isSimulationMode.collectAsState()
 
     LaunchedEffect(selectedSuburb.id) {
         viewModel.refreshTrackGeometry(selectedSuburb)
@@ -131,8 +130,6 @@ fun MapScreen(viewModel: TrainViewModel) {
         "REFERENCE_NETWORK_DERIVED" -> "المسار: تقريبي بين المحطات، ليس محور سكة ممسوحًا"
         null -> "المسار: ترتيب محطات تقريبي (لا توجد هندسة منشورة)"
         else -> "المسار: مصدر غير معروف"
-    }.let { base ->
-        if (isSimulationMode) "المصدر: محاكاة محلية فقط\n$base" else base
     }
 
     // Push only real live coordinates to the Leaflet layer; never create a fallback train.
@@ -391,8 +388,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                     androidx.compose.runtime.key(
                         selectedSuburb.id,
                         trackGeometry?.sourceKind,
-                        trackGeometry?.coordinates?.hashCode(),
-                        isSimulationMode
+                        trackGeometry?.coordinates?.hashCode()
                     ) {
                         AndroidView(
                         factory = { ctx ->
@@ -1030,7 +1026,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = if (isSimulationMode) "المصدر: محاكاة محلية" else "المصدر: بيانات مباشرة • ${mapSourceLabel.substringBefore("\\n")}",
+                                text = "المصدر: بيانات مباشرة • ${mapSourceLabel.substringBefore("\\n")}",
                                 color = Color(0xFF94A3B8),
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.weight(1f)
