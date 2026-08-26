@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -52,6 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -75,6 +77,19 @@ import com.example.viewmodel.TrainViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnboardScreen(viewModel: TrainViewModel) {
+    val context = LocalContext.current
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED ||
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
     val isOnboard by viewModel.isOnboardMode.collectAsState()
     val isOnboardActivationPending by viewModel.isOnboardActivationPending.collectAsState()
     val selectedCrowdingReport by viewModel.selectedCrowdingReport.collectAsState()
@@ -97,9 +112,11 @@ fun OnboardScreen(viewModel: TrainViewModel) {
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
         val permissionGranted = fineGranted || coarseGranted
         if (permissionGranted) {
+            hasLocationPermission = true
             viewModel.toggleOnboardMode(true)
             viewModel.setUserFeedback("تم السماح بالموقع. جارٍ إنشاء جلسة البث المباشر...")
         } else {
+            hasLocationPermission = false
             viewModel.setUserFeedback("لم يتم تفعيل المستشعر: يجب السماح بصلاحية الموقع أولًا.")
         }
     }
@@ -249,17 +266,30 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                                             Text(
-                            text = if (isOnboardActivationPending) "جارٍ تفعيل بث المستشعر..." else "تفعيل بث المستشعر المباشر",
+                            text = when {
+                                isOnboardActivationPending -> "جارٍ تفعيل بث المستشعر..."
+                                isOnboard -> "بث الموقع الحي مفعّل"
+                                hasLocationPermission -> "صلاحية الموقع مفعّلة — البث ينتظر قطارًا حيًا"
+                                else -> "تفعيل بث المستشعر المباشر"
+                            },
 
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White
+                        color = if (hasLocationPermission) Color(0xFFD1FAE5) else Color.White
                     )
-                    Switch(
-                        checked = isOnboard || isOnboardActivationPending,
-                        enabled = !isOnboardActivationPending,
-                        onCheckedChange = { enable ->
-                            if (enable) {
+                    if (hasLocationPermission && !isOnboard && !isOnboardActivationPending) {
+                        Text(
+                            text = "✓",
+                            color = Color(0xFF34D399),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            if (isOnboard) {
+                                viewModel.toggleOnboardMode(false)
+                            } else if (!hasLocationPermission) {
                                 permissionLauncher.launch(
                                     arrayOf(
                                         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -267,10 +297,42 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                                     )
                                 )
                             } else {
-                                viewModel.toggleOnboardMode(false)
+                                viewModel.toggleOnboardMode(true)
                             }
-                        }
-                    )
+                        },
+                        enabled = !isOnboardActivationPending,
+                        modifier = Modifier.width(154.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = when {
+                                isOnboard -> Color(0xFF059669)
+                                isOnboardActivationPending -> Color(0xFF475569)
+                                hasLocationPermission -> Color(0xFF0369A1)
+                                else -> Color(0xFF1E293B)
+                            },
+                            contentColor = Color.White,
+                            disabledContainerColor = Color(0xFF475569),
+                            disabledContentColor = Color(0xFFE2E8F0)
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isOnboard) Icons.Default.CheckCircle else Icons.Default.SatelliteAlt,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = when {
+                                isOnboard -> "إيقاف البث"
+                                isOnboardActivationPending -> "جارٍ التفعيل"
+                                hasLocationPermission -> "بدء البث"
+                                else -> "السماح بالموقع"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
         }
