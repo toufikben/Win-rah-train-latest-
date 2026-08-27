@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.LiveTrainRepository
 import com.example.data.local.LocalMonitorSessionStore
+import com.example.data.local.PersistentAppLogger
 import com.example.model.MonitorBinding
 import com.example.model.TrainDirection
 import com.example.data.remote.dto.ObservationRequest
@@ -47,25 +48,29 @@ class TrainTrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        log("SERVICE_ON_CREATE")
         try {
             TrainNotificationHelper.initNotificationChannels(this)
             locationCoordinator = LocationTrackingCoordinatorProvider.get(this)
             repository = LiveTrainRepository(context = this)
             sessionStore = LocalMonitorSessionStore(this)
             initialized = true
+            log("SERVICE_INITIALIZED")
         } catch (error: Exception) {
-            Log.e(TAG, "Foreground service initialization failed", error)
+            log("SERVICE_INITIALIZATION_FAILED", error)
             stopSelf()
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        log("SERVICE_ON_START_COMMAND action=${intent?.action} startId=$startId")
         if (!initialized) {
-            Log.e(TAG, "Ignoring start request because service initialization failed")
+            log("START_REJECTED_NOT_INITIALIZED")
             stopSelf(startId)
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_STOP) {
+            log("STOP_REQUEST_RECEIVED")
             runCatching { sessionStore.clear() }
                 .onFailure { Log.w(TAG, "Unable to clear persisted session", it) }
             stopServiceSafely(startId, clearSession = false)
@@ -82,7 +87,9 @@ class TrainTrackingService : Service() {
         }.getOrNull()
         val tripId = intent?.getStringExtra(EXTRA_TRIP_ID) ?: persisted?.tripId
         val trainId = intent?.getStringExtra(EXTRA_TRAIN_ID) ?: persisted?.trainId
+        log("BINDING_READ sessionPresent=${!sessionId.isNullOrBlank()} linePresent=${!lineId.isNullOrBlank()} direction=${direction?.name}")
         if (sessionId.isNullOrBlank() || lineId.isNullOrBlank() || direction == null) {
+            log("START_REJECTED_INVALID_BINDING")
             stopServiceSafely(startId, clearSession = true)
             return START_NOT_STICKY
         }
@@ -94,11 +101,12 @@ class TrainTrackingService : Service() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
         if (!hasLocationPermission) {
-            Log.w(TAG, "Location permission is not granted")
+            log("START_REJECTED_LOCATION_PERMISSION_MISSING")
             stopServiceSafely(startId, clearSession = true)
             return START_NOT_STICKY
         }
 
+        log("LOCATION_PERMISSION_OK")
         val notification = runCatching {
             TrainNotificationHelper.buildOngoingTripNotification(
                 this,
@@ -107,7 +115,7 @@ class TrainTrackingService : Service() {
                 isTunnel = false,
             )
         }.getOrElse {
-            Log.e(TAG, "Unable to build foreground notification", it)
+            log("NOTIFICATION_BUILD_FAILED", it)
             stopServiceSafely(startId, clearSession = false)
             return START_NOT_STICKY
         }
@@ -123,13 +131,15 @@ class TrainTrackingService : Service() {
             }
         }.isSuccess
         if (!foregroundStarted) {
-            Log.e(TAG, "startForeground failed")
+            log("START_FOREGROUND_FAILED")
             stopServiceSafely(startId, clearSession = false)
             return START_NOT_STICKY
         }
 
+        log("START_FOREGROUND_SUCCESS")
         serviceScope.launch {
             try {
+                log("SESSION_RESUME_BEGIN sessionId=$sessionId")
             val validation = runCatching {
                 repository.resumeMonitorSession(sessionId, lineId, direction, tripId, trainId)
             }
@@ -142,6 +152,7 @@ class TrainTrackingService : Service() {
                 return@launch
             }
             val verified = validation.getOrThrow()
+            log("SESSION_RESUME_SUCCESS status=${verified.status}")
             if (verified.id != sessionId || verified.lineId != lineId || verified.direction != direction.name || verified.tripId != tripId || verified.trainId != trainId || verified.status !in setOf("STARTING", "ACTIVE")) {
                 sessionStore.clear()
                 stopSelf()
@@ -150,11 +161,14 @@ class TrainTrackingService : Service() {
             sessionStore.save(MonitorBinding(sessionId, lineId, direction, tripId, trainId))
 
             val wasAlreadyTracking = locationCoordinator.isTracking.value
+            log("LOCATION_START_BEGIN")
             if (!locationCoordinator.start()) {
+                log("LOCATION_START_RETURNED_FALSE")
                 stopSelf()
                 return@launch
             }
             serviceOwnsLocation = !wasAlreadyTracking
+            log("LOCATION_START_SUCCESS serviceOwnsLocation=$serviceOwnsLocation")
             observationJob?.cancel()
             observationJob = launch {
                 locationCoordinator.gpsData
@@ -163,6 +177,7 @@ class TrainTrackingService : Service() {
                         val now = System.currentTimeMillis()
                         if (now - lastSentAt < 10_000L) return@collect
                         runCatching {
+                            log("OBSERVATION_SEND_BEGIN accuracy=${gps.accuracyMeters}")
                             val response = repository.submitObservation(
                                 ObservationRequest(
                                     sessionId = sessionId,
@@ -182,11 +197,14 @@ class TrainTrackingService : Service() {
                                 error("observation_not_accepted")
                             }
                             lastSentAt = now
+                            log("OBSERVATION_SEND_SUCCESS")
+                        }.onFailure { error ->
+                            log("OBSERVATION_SEND_FAILED", error)
                         }
                     }
             }
             } catch (error: Exception) {
-                Log.e(TAG, "Background tracking failed", error)
+                log("BACKGROUND_TRACKING_FAILED", error)
                 stopServiceSafely(startId, clearSession = false)
             }
         }
@@ -195,6 +213,7 @@ class TrainTrackingService : Service() {
     }
 
     override fun onDestroy() {
+        log("SERVICE_ON_DESTROY")
         observationJob?.cancel()
         observationJob = null
         if (initialized) {
@@ -219,6 +238,10 @@ class TrainTrackingService : Service() {
             .onFailure { Log.w(TAG, "Unable to stop foreground state", it) }
         runCatching { stopSelf(startId) }
             .onFailure { Log.w(TAG, "Unable to stop service", it) }
+    }
+
+    private fun log(event: String, error: Throwable? = null) {
+        PersistentAppLogger.write(event, error)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
