@@ -25,6 +25,9 @@ android {
   val configuredApiWritesEnabled = providers.gradleProperty("WINRAH_API_WRITES_ENABLED").orElse(
     System.getenv("WINRAH_API_WRITES_ENABLED") ?: "false"
   ).get().toBooleanStrictOrNull() ?: false
+  val configuredTestWriteApp = providers.gradleProperty("WINRAH_TEST_WRITE_APP").orElse(
+    System.getenv("WINRAH_TEST_WRITE_APP") ?: "false"
+  ).get().toBooleanStrictOrNull() ?: false
   require(configuredApiBaseUrl.isNotBlank() && !configuredApiBaseUrl.contains("\n")) {
     "WINRAH_API_BASE_URL must be a non-empty single-line URL"
   }
@@ -53,6 +56,11 @@ android {
     buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
     buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
     manifestPlaceholders["usesCleartextTraffic"] = false
+    manifestPlaceholders["appLabel"] = if (configuredTestWriteApp) {
+      "@string/app_name_test_write"
+    } else {
+      "@string/app_name"
+    }
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -81,6 +89,13 @@ android {
     }
     debug { signingConfig = signingConfigs.getByName("debugConfig") }
   }
+
+  if (configuredTestWriteApp) {
+    buildTypes.getByName("debug") {
+      applicationIdSuffix = ".testwrite"
+    }
+  }
+
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11

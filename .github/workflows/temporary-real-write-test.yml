@@ -98,6 +98,7 @@ jobs:
             -PWINRAH_API_BASE_URL="$WINRAH_API_BASE_URL" \
             -PWINRAH_API_ENVIRONMENT="$WINRAH_API_ENVIRONMENT" \
             -PWINRAH_API_WRITES_ENABLED=true \
+            -PWINRAH_TEST_WRITE_APP=true \
             -PKEYSTORE_PATH="$DEBUG_KEYSTORE_PATH" \
             testDebugUnitTest lintDebug assembleDebug
 
