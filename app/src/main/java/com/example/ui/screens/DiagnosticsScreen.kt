@@ -52,6 +52,11 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var logText by remember { mutableStateOf("") }
     var showClearDialog by remember { mutableStateOf(false) }
+    val latestSessionStatus = remember(logText) {
+        logText.lineSequence()
+            .filter { it.contains("SESSION_CREATE_") || it.contains("BROADCAST_ACTIVATION_FAILED") }
+            .lastOrNull()
+    }
 
     fun refreshLog() {
         logText = PersistentAppLogger.read(context)
@@ -125,6 +130,21 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
                 "السجل محفوظ على الهاتف فقط ولا يُرسل تلقائيًا.\nآخر تحديث تلقائي كل ثانية.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = when {
+                    latestSessionStatus == null -> "آخر نتيجة للجلسة: لا توجد محاولة مسجلة"
+                    latestSessionStatus.contains("FAILED") -> "آخر نتيجة للجلسة: فشل — راجع السجل الكامل"
+                    latestSessionStatus.contains("SUCCESS") -> "آخر نتيجة للجلسة: نجحت الجلسة"
+                    else -> "آخر نتيجة للجلسة: جارٍ التحقق"
+                },
+                color = when {
+                    latestSessionStatus?.contains("FAILED") == true -> MaterialTheme.colorScheme.error
+                    latestSessionStatus?.contains("SUCCESS") == true -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                style = MaterialTheme.typography.labelLarge,
             )
             Spacer(Modifier.height(8.dp))
             SelectionContainer {

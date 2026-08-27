@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
 import com.example.data.LiveTrainRepository
+import com.example.data.local.PersistentAppLogger
 import com.example.data.TrackGeometry
 import com.example.data.TrainRepository
 import com.example.data.remote.dto.ObservationRequest
@@ -54,6 +55,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
+import java.io.IOException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -434,11 +436,28 @@ class TrainViewModel private constructor(
                     ?: throw IllegalStateException("broadcast_selection_required")
                 val requestedTripId = selection.tripId
                 val requestedTrainId = selection.trainId
-                val session = liveTrainRepository.createMonitorSession(
-                    lineId = selection.lineId,
-                    direction = selection.direction,
-                    tripId = requestedTripId,
-                    trainId = requestedTrainId,
+                PersistentAppLogger.write(
+                    "SESSION_CREATE_BEGIN " +
+                        "lineId=${selection.lineId} " +
+                        "direction=${selection.direction.name} " +
+                        "tripSelected=${requestedTripId != null} " +
+                        "trainSelected=${requestedTrainId != null}"
+                )
+                val session = try {
+                    liveTrainRepository.createMonitorSession(
+                        lineId = selection.lineId,
+                        direction = selection.direction,
+                        tripId = requestedTripId,
+                        trainId = requestedTrainId,
+                    )
+                } catch (error: Throwable) {
+                    val diagnostic = describeSessionFailure(error)
+                    PersistentAppLogger.write("SESSION_CREATE_FAILED detail=$diagnostic", error)
+                    throw error
+                }
+                PersistentAppLogger.write(
+                    "SESSION_CREATE_SUCCESS sessionId=${session.id} " +
+                        "lineId=${session.lineId} direction=${session.direction}"
                 )
                 createdSessionId = session.id
                 if (session.tripId != requestedTripId || session.trainId != requestedTrainId) {
@@ -477,12 +496,18 @@ class TrainViewModel private constructor(
                 locationTracker.stop()
                 stopTrainTrackingService()
                 _verificationStatus.value = VerificationStatus.WAITING_GPS
+                PersistentAppLogger.write(
+                    "BROADCAST_ACTIVATION_FAILED detail=${describeSessionFailure(error)}",
+                    error,
+                )
                 _userFeedbackMessage.value = if (error.message == "location_unavailable") {
                     "تعذر بدء الموقع. تحقق من صلاحية GPS وإشارة الجهاز."
                 } else if (error.message == "no_live_trackable_train") {
                     "لا يوجد قطار حي موثق يمكن بدء المراقبة عليه الآن."
                 } else if (error.message == "broadcast_selection_required") {
                     "اختر الضاحية والاتجاه قبل بدء البث. الرحلة والقطار اختياريان."
+                } else if (error is HttpException && error.code() == 400) {
+                    "الخادم رفض بيانات الجلسة (400). افتح شاشة التشخيص للتفاصيل."
                 } else if (error is HttpException && error.code() == 403) {
                     "البث محجوب في نسخة الاختبار الحالية لحماية خادم Production."
                 } else if (error.message == "session_binding_mismatch") {
@@ -493,6 +518,25 @@ class TrainViewModel private constructor(
             }
         }
         return true
+    }
+
+    private fun describeSessionFailure(error: Throwable): String {
+        return when (error) {
+            is HttpException -> {
+                val status = error.code()
+                val body = runCatching {
+                    error.response()?.errorBody()?.string().orEmpty()
+                }.getOrDefault("")
+                val serverMessage = runCatching {
+                    JSONObject(body).optString("message")
+                        .ifBlank { JSONObject(body).optString("error") }
+                        .ifBlank { "no-server-message" }
+                }.getOrDefault("unparseable-server-response")
+                "HTTP_$status: $serverMessage"
+            }
+            is IOException -> "NETWORK_ERROR: ${error.message ?: "connection-failed"}"
+            else -> "${error.javaClass.simpleName}: ${error.message ?: "no-message"}"
+        }
     }
 
     private fun startTrainTrackingService(
