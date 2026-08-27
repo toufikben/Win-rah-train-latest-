@@ -22,12 +22,14 @@ android {
   val configuredApiEnvironment = providers.gradleProperty("WINRAH_API_ENVIRONMENT").orElse(
     System.getenv("WINRAH_API_ENVIRONMENT") ?: "production"
   ).get().trim().lowercase()
-  val configuredApiWritesEnabled = providers.gradleProperty("WINRAH_API_WRITES_ENABLED").orElse(
-    System.getenv("WINRAH_API_WRITES_ENABLED") ?: "false"
-  ).get().toBooleanStrictOrNull() ?: false
   val configuredTestWriteApp = providers.gradleProperty("WINRAH_TEST_WRITE_APP").orElse(
     System.getenv("WINRAH_TEST_WRITE_APP") ?: "false"
   ).get().toBooleanStrictOrNull() ?: false
+  val requestedApiWritesEnabled = providers.gradleProperty("WINRAH_API_WRITES_ENABLED").orElse(
+    System.getenv("WINRAH_API_WRITES_ENABLED") ?: "false"
+  ).get().toBooleanStrictOrNull() ?: false
+  // Only the explicitly separate .testwrite package may enable writes. Production remains false by default.
+  val configuredApiWritesEnabled = configuredTestWriteApp && requestedApiWritesEnabled
   require(configuredApiBaseUrl.isNotBlank() && !configuredApiBaseUrl.contains("\n")) {
     "WINRAH_API_BASE_URL must be a non-empty single-line URL"
   }
