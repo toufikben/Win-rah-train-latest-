@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -481,7 +482,9 @@ class TrainViewModel private constructor(
                 } else if (error.message == "no_live_trackable_train") {
                     "لا يوجد قطار حي موثق يمكن بدء المراقبة عليه الآن."
                 } else if (error.message == "broadcast_selection_required") {
-                    "اختر الضاحية والاتجاه والرحلة والقطار قبل بدء البث."
+                    "اختر الضاحية والاتجاه قبل بدء البث. الرحلة والقطار اختياريان."
+                } else if (error is HttpException && error.code() == 403) {
+                    "البث محجوب في نسخة الاختبار الحالية لحماية خادم Production."
                 } else if (error.message == "session_binding_mismatch") {
                     "رفض الخادم جلسة لا تطابق القطار المطلوب؛ لم يبدأ البث."
                 } else {
