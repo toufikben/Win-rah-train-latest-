@@ -1062,6 +1062,11 @@ class TrainViewModel private constructor(
         lastObservationSentAt = now
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
+                PersistentAppLogger.write(
+                    "OBSERVATION_SEND_BEGIN sessionId=${binding.sessionId} " +
+                        "accuracy=${gps.accuracyMeters} speedKmh=${gps.speedKmh} " +
+                        "lat=${gps.latitude} lon=${gps.longitude}"
+                )
                 val response = liveTrainRepository.submitObservation(
                     ObservationRequest(
                         sessionId = binding.sessionId,
@@ -1077,12 +1082,27 @@ class TrainViewModel private constructor(
                         timestamp = if (gps.timestamp > 0L) gps.timestamp else now
                     )
                 )
-                if (response["accepted"] != true) {
-                    throw IllegalStateException("observation_not_accepted")
+                val accepted = response["accepted"] == true
+                PersistentAppLogger.write(
+                    "OBSERVATION_RESPONSE accepted=$accepted " +
+                        "scope=${response["scope"] ?: "unknown"} " +
+                        "reason=${response["rejection_reason"] ?: response["reason"] ?: "none"} " +
+                        "observationId=${response["observation_id"] ?: "none"}"
+                )
+                if (!accepted) {
+                    throw IllegalStateException(
+                        "observation_not_accepted:" +
+                            (response["rejection_reason"] ?: response["reason"] ?: "unknown")
+                    )
                 }
                 _lastObservationAcceptedAt.value = now
+                PersistentAppLogger.write("OBSERVATION_SEND_SUCCESS sessionId=${binding.sessionId}")
             }.onFailure {
-                _userFeedbackMessage.value = if (it.message == "observation_not_accepted") {
+                PersistentAppLogger.write(
+                    "OBSERVATION_SEND_FAILED sessionId=${binding.sessionId} detail=${it.message ?: it.javaClass.simpleName}",
+                    it,
+                )
+                _userFeedbackMessage.value = if (it.message?.startsWith("observation_not_accepted") == true) {
                     "رفض الخادم آخر ملاحظة GPS؛ ستتم إعادة المحاولة تلقائيًا."
                 } else {
                     "تعذر إرسال آخر ملاحظة للمصدر الحي؛ ستستمر المحاولة تلقائياً."
@@ -1105,6 +1125,10 @@ class TrainViewModel private constructor(
         viewModelScope.launch(Dispatchers.IO) {
             _isLiveDataLoading.value = true
             _liveDataError.value = null
+            PersistentAppLogger.write(
+                "RECEPTION_REFRESH_BEGIN lineId=${_selectedSuburb.value.id} " +
+                    "station=${_selectedStation.value.code} direction=${_selectedDirectionFilter.value}"
+            )
             try {
                 val trains = liveTrainRepository.getLiveTrainsForLine(
                     _selectedSuburb.value,
@@ -1115,6 +1139,13 @@ class TrainViewModel private constructor(
                         train.direction == _selectedDirectionFilter.value
                 }
                 _activeTrains.value = trains
+                PersistentAppLogger.write(
+                    "RECEPTION_REFRESH_SUCCESS count=${trains.size} " +
+                        "trains=${trains.take(10).joinToString(separator = ";") { train ->
+                            "id=${train.id},speed=${train.speedKmh},eta=${train.etaToWaitingStationMinutes}," +
+                                "status=${train.status},next=${train.nextStation?.code}"
+                        }}"
+                )
                 if (trains.isEmpty()) {
                     val trackableTrip = liveTrainRepository.getTrackableTripForLine(_selectedSuburb.value)
                     _liveDataError.value = if (trackableTrip == null) {
@@ -1124,7 +1155,8 @@ class TrainViewModel private constructor(
                     }
                 }
                 checkApproachingTrain()
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                PersistentAppLogger.write("RECEPTION_REFRESH_FAILED detail=${error.message ?: error.javaClass.simpleName}", error)
                 _activeTrains.value = emptyList()
                 _liveDataError.value = "تعذر جلب البث الحي من الخادم. تحقق من الاتصال وحاول مجدداً."
             } finally {
