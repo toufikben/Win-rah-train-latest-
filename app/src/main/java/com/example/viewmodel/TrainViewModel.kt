@@ -528,9 +528,14 @@ class TrainViewModel private constructor(
                     error.response()?.errorBody()?.string().orEmpty()
                 }.getOrDefault("")
                 val serverMessage = runCatching {
-                    JSONObject(body).optString("message")
-                        .ifBlank { JSONObject(body).optString("error") }
-                        .ifBlank { "no-server-message" }
+                    val json = JSONObject(body)
+                    val detail = json.opt("detail")
+                    when (detail) {
+                        is String -> detail
+                        null -> json.optString("message")
+                            .ifBlank { json.optString("error") }
+                        else -> detail.toString()
+                    }.ifBlank { "no-server-message" }
                 }.getOrDefault("unparseable-server-response")
                 "HTTP_$status: $serverMessage"
             }
