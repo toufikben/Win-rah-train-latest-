@@ -115,8 +115,8 @@ data class BroadcastTripOption(
 data class BroadcastSelection(
     val lineId: String,
     val direction: TrainDirection,
-    val tripId: String,
-    val trainId: String,
+    val tripId: String? = null,
+    val trainId: String? = null,
 )
 
 data class WaitingSelection(

@@ -325,7 +325,10 @@ class TrainViewModel private constructor(
         }
         if (_broadcastLine.value.id == suburb.id) return
         _broadcastLine.value = suburb
-        _broadcastSelection.value = null
+        _broadcastSelection.value = BroadcastSelection(
+            lineId = suburb.id,
+            direction = _broadcastDirection.value,
+        )
         refreshBroadcastTrips()
     }
 
@@ -336,7 +339,10 @@ class TrainViewModel private constructor(
         }
         if (direction == TrainDirection.BOTH) return
         _broadcastDirection.value = direction
-        _broadcastSelection.value = null
+        _broadcastSelection.value = BroadcastSelection(
+            lineId = _broadcastLine.value.id,
+            direction = direction,
+        )
         refreshBroadcastTrips()
     }
 
@@ -352,7 +358,10 @@ class TrainViewModel private constructor(
                 tripId = it.tripId,
                 trainId = it.trainId,
             )
-        }
+        } ?: BroadcastSelection(
+            lineId = _broadcastLine.value.id,
+            direction = _broadcastDirection.value,
+        )
     }
 
     fun refreshBroadcastTrips() {
@@ -365,11 +374,18 @@ class TrainViewModel private constructor(
             }.onSuccess { trips ->
                 _broadcastTrips.value = trips
                 if (_broadcastSelection.value?.tripId !in trips.map { it.tripId }) {
-                    _broadcastSelection.value = null
+                    _broadcastSelection.value = BroadcastSelection(
+                        lineId = _broadcastLine.value.id,
+                        direction = _broadcastDirection.value,
+                    )
                 }
             }.onFailure {
                 _broadcastTrips.value = emptyList()
-                _broadcastSelection.value = null
+                _broadcastSelection.value = BroadcastSelection(
+                    lineId = _broadcastLine.value.id,
+                    direction = _broadcastDirection.value,
+                )
+                _userFeedbackMessage.value = "تعذر تحميل قائمة القطارات؛ يمكنك بدء بث المسار والاتجاه دون اختيار قطار."
             }
         }
     }
@@ -418,8 +434,10 @@ class TrainViewModel private constructor(
                 val requestedTripId = selection.tripId
                 val requestedTrainId = selection.trainId
                 val session = liveTrainRepository.createMonitorSession(
+                    lineId = selection.lineId,
+                    direction = selection.direction,
                     tripId = requestedTripId,
-                    trainId = requestedTrainId
+                    trainId = requestedTrainId,
                 )
                 createdSessionId = session.id
                 if (session.tripId != requestedTripId || session.trainId != requestedTrainId) {
@@ -430,12 +448,20 @@ class TrainViewModel private constructor(
                 }
                 _monitorBinding.value = MonitorBinding(
                     sessionId = session.id,
+                    lineId = session.lineId,
+                    direction = selection.direction,
                     tripId = session.tripId,
-                    trainId = session.trainId
+                    trainId = session.trainId,
                 )
                 _activeSessionReports.value = emptyList()
                 refreshActiveSessionReports()
-                startTrainTrackingService(session.id, session.tripId, session.trainId)
+                startTrainTrackingService(
+                    session.id,
+                    session.lineId,
+                    selection.direction,
+                    session.tripId,
+                    session.trainId,
+                )
                 _isOnboardMode.value = true
                 _isOnboardActivationPending.value = false
                 _userFeedbackMessage.value = "تم بدء البث الحقيقي من جهازك بعد إنشاء جلسة المراقبة."
@@ -466,12 +492,20 @@ class TrainViewModel private constructor(
         return true
     }
 
-    private fun startTrainTrackingService(sessionId: String, tripId: String, trainId: String) {
+    private fun startTrainTrackingService(
+        sessionId: String,
+        lineId: String,
+        direction: TrainDirection,
+        tripId: String?,
+        trainId: String?,
+    ) {
         val intent = Intent(app, TrainTrackingService::class.java).apply {
             action = TrainTrackingService.ACTION_START
             putExtra(TrainTrackingService.EXTRA_SESSION_ID, sessionId)
-            putExtra(TrainTrackingService.EXTRA_TRIP_ID, tripId)
-            putExtra(TrainTrackingService.EXTRA_TRAIN_ID, trainId)
+            putExtra(TrainTrackingService.EXTRA_LINE_ID, lineId)
+            putExtra(TrainTrackingService.EXTRA_DIRECTION, direction.name)
+            tripId?.let { putExtra(TrainTrackingService.EXTRA_TRIP_ID, it) }
+            trainId?.let { putExtra(TrainTrackingService.EXTRA_TRAIN_ID, it) }
         }
         runCatching { ContextCompat.startForegroundService(app, intent) }
             .onFailure { _userFeedbackMessage.value = "تعذر تشغيل التتبع في الخلفية؛ سيستمر التتبع أثناء فتح التطبيق." }
@@ -654,8 +688,13 @@ class TrainViewModel private constructor(
             _userFeedbackMessage.value = "ابدأ بثًا حيًا موثقًا قبل إرسال إفادة من وضع الراكب."
             return
         }
+        val trainId = binding.trainId
+        if (trainId == null) {
+            _userFeedbackMessage.value = "اختر قطارًا محددًا قبل إرسال إفادة عن حالة قطار."
+            return
+        }
         submitEvidenceReport(
-            trainId = binding.trainId,
+            trainId = trainId,
             tripId = binding.tripId,
             reportType = reportType,
             description = description,
@@ -957,6 +996,8 @@ class TrainViewModel private constructor(
                 val response = liveTrainRepository.submitObservation(
                     ObservationRequest(
                         sessionId = binding.sessionId,
+                        lineId = binding.lineId,
+                        direction = binding.direction.name,
                         tripId = binding.tripId,
                         trainId = binding.trainId,
                         latitude = gps.latitude,

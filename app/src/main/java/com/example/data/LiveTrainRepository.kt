@@ -114,25 +114,39 @@ class LiveTrainRepository(
         )
     }
 
-    suspend fun createMonitorSession(tripId: String, trainId: String): MonitorSessionDto {
+    suspend fun createMonitorSession(
+        lineId: String,
+        direction: TrainDirection,
+        tripId: String? = null,
+        trainId: String? = null,
+    ): MonitorSessionDto {
         return api.createMonitorSession(
             MonitorSessionRequest(
+                lineId = lineId,
+                direction = direction.name,
                 tripId = tripId,
                 trainId = trainId,
-                anonymousMonitorId = getAnonymousMonitorId()
+                anonymousMonitorId = getAnonymousMonitorId(),
             )
         )
     }
 
-    suspend fun resumeMonitorSession(sessionId: String, tripId: String, trainId: String): MonitorSessionDto =
-        api.resumeMonitorSession(
-            sessionId,
-            ResumeMonitorSessionRequest(
-                tripId = tripId,
-                trainId = trainId,
-                anonymousMonitorId = getAnonymousMonitorId(),
-            ),
-        )
+    suspend fun resumeMonitorSession(
+        sessionId: String,
+        lineId: String,
+        direction: TrainDirection,
+        tripId: String? = null,
+        trainId: String? = null,
+    ): MonitorSessionDto = api.resumeMonitorSession(
+        sessionId,
+        ResumeMonitorSessionRequest(
+            lineId = lineId,
+            direction = direction.name,
+            tripId = tripId,
+            trainId = trainId,
+            anonymousMonitorId = getAnonymousMonitorId(),
+        ),
+    )
 
     suspend fun endMonitorSession(sessionId: String): MonitorSessionDto =
         api.endMonitorSession(sessionId)

@@ -15,8 +15,10 @@ class LocalMonitorSessionStore(context: Context) {
         val values = ContentValues().apply {
             put(COLUMN_ID, ROW_ID)
             put(COLUMN_SESSION_ID, binding.sessionId)
-            put(COLUMN_TRIP_ID, binding.tripId)
-            put(COLUMN_TRAIN_ID, binding.trainId)
+            binding.tripId?.let { put(COLUMN_TRIP_ID, it) } ?: putNull(COLUMN_TRIP_ID)
+            binding.trainId?.let { put(COLUMN_TRAIN_ID, it) } ?: putNull(COLUMN_TRAIN_ID)
+            put(COLUMN_LINE_ID, binding.lineId)
+            put(COLUMN_DIRECTION, binding.direction.name)
             put(COLUMN_SAVED_AT, System.currentTimeMillis())
         }
         helper.writableDatabase.insertWithOnConflict(
@@ -31,7 +33,7 @@ class LocalMonitorSessionStore(context: Context) {
     fun load(): MonitorBinding? {
         helper.readableDatabase.query(
             TABLE,
-            arrayOf(COLUMN_SESSION_ID, COLUMN_TRIP_ID, COLUMN_TRAIN_ID),
+            arrayOf(COLUMN_SESSION_ID, COLUMN_LINE_ID, COLUMN_DIRECTION, COLUMN_TRIP_ID, COLUMN_TRAIN_ID),
             "$COLUMN_ID = ?",
             arrayOf(ROW_ID.toString()),
             null,
@@ -41,10 +43,12 @@ class LocalMonitorSessionStore(context: Context) {
         ).use { cursor ->
             if (!cursor.moveToFirst()) return null
             val sessionId = cursor.getString(0)
-            val tripId = cursor.getString(1)
-            val trainId = cursor.getString(2)
-            if (sessionId.isBlank() || tripId.isBlank() || trainId.isBlank()) return null
-            return MonitorBinding(sessionId, tripId, trainId)
+            val lineId = cursor.getString(1)
+            val direction = runCatching { com.example.model.TrainDirection.valueOf(cursor.getString(2)) }.getOrNull()
+            val tripId = cursor.getString(3)
+            val trainId = cursor.getString(4)
+            if (sessionId.isBlank() || lineId.isNullOrBlank() || direction == null) return null
+            return MonitorBinding(sessionId, lineId, direction, tripId, trainId)
         }
     }
 
@@ -61,8 +65,10 @@ class LocalMonitorSessionStore(context: Context) {
                 "CREATE TABLE $TABLE (" +
                     "$COLUMN_ID INTEGER PRIMARY KEY, " +
                     "$COLUMN_SESSION_ID TEXT NOT NULL, " +
-                    "$COLUMN_TRIP_ID TEXT NOT NULL, " +
-                    "$COLUMN_TRAIN_ID TEXT NOT NULL, " +
+                    "$COLUMN_LINE_ID TEXT NOT NULL, " +
+                    "$COLUMN_DIRECTION TEXT NOT NULL, " +
+                    "$COLUMN_TRIP_ID TEXT, " +
+                    "$COLUMN_TRAIN_ID TEXT, " +
                     "$COLUMN_SAVED_AT INTEGER NOT NULL" +
                     ")"
             )
@@ -72,16 +78,22 @@ class LocalMonitorSessionStore(context: Context) {
             if (oldVersion < 2) {
                 db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COLUMN_SAVED_AT INTEGER NOT NULL DEFAULT 0")
             }
+            if (oldVersion < 3) {
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COLUMN_LINE_ID TEXT")
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COLUMN_DIRECTION TEXT")
+            }
         }
     }
 
     private companion object {
         const val DATABASE = "winrah_local_state.db"
-        const val VERSION = 2
+        const val VERSION = 3
         const val TABLE = "monitor_session"
         const val ROW_ID = 1L
         const val COLUMN_ID = "id"
         const val COLUMN_SESSION_ID = "session_id"
+        const val COLUMN_LINE_ID = "line_id"
+        const val COLUMN_DIRECTION = "direction"
         const val COLUMN_TRIP_ID = "trip_id"
         const val COLUMN_TRAIN_ID = "train_id"
         const val COLUMN_SAVED_AT = "saved_at"

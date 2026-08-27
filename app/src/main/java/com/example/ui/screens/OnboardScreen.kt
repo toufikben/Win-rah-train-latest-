@@ -178,13 +178,13 @@ fun OnboardScreen(viewModel: TrainViewModel) {
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "اختيار رحلة بث موقع القطار",
+                    text = "اختيار مسار واتجاه بث الموقع",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
                 Text(
-                    text = "للمستخدم الموجود داخل القطار فقط. لا تحتاج إلى اختيار محطة انتظار.",
+                    text = "اختر المسار والاتجاه. اختيار رحلة أو قطار محدد اختياري لتحسين الربط.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF94A3B8)
                 )
@@ -259,7 +259,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                         value = selectedTrip?.let { "قطار ${it.trainId.take(8)} • ${it.direction.titleAr}" } ?: "لم تُختر رحلة",
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("الرحلة والقطار") },
+                        label = { Text("قطار محدد (اختياري)") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(broadcastTripMenuExpanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
@@ -291,9 +291,9 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = if (broadcastTrips.isEmpty()) {
-                        "لا يمكن بدء البث حتى تتوفر رحلة حقيقية."
+                        "لا توجد قطارات حية الآن؛ يمكنك بدء بث المسار والاتجاه وانتظار البيانات الحقيقية."
                     } else if (broadcastSelection == null) {
-                        "اختر الرحلة والقطار قبل بدء البث."
+                        "يمكنك بدء بث المسار والاتجاه دون اختيار قطار."
                     } else {
                         "تم اختيار رحلة حقيقية؛ يمكنك بدء البث بعد تفعيل صلاحية الموقع."
                     },
@@ -427,7 +427,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             text = when {
                                 isOnboardActivationPending -> "جارٍ تفعيل بث المستشعر..."
                                 isOnboard -> "بث الموقع الحي مفعّل"
-                                broadcastSelection == null -> "اختر رحلة وقطارًا أولًا"
+                                broadcastSelection == null -> "اختر المسار والاتجاه أولًا"
                                 hasLocationPermission -> "البث متوقف — جاهز للبدء"
                                 else -> "فعّل صلاحية GPS أولًا"
                             },
@@ -449,7 +449,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             if (isOnboard) {
                                 viewModel.toggleOnboardMode(false)
                             } else if (broadcastSelection == null) {
-                                viewModel.setUserFeedback("اختر الضاحية والاتجاه والرحلة والقطار قبل بدء البث.")
+                                viewModel.setUserFeedback("اختر الضاحية والاتجاه قبل بدء البث. القطار اختياري.")
                             } else if (!hasLocationPermission) {
                                 viewModel.setUserFeedback("فعّل صلاحية GPS من زر صلاحية الموقع أولًا.")
                             } else {
