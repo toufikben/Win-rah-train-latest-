@@ -3,6 +3,7 @@ package com.example.location
 import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
+import com.example.data.local.PersistentAppLogger
 import com.example.model.LiveGpsData
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -54,11 +55,13 @@ class LocationTracker(context: Context) {
             _isTracking.value = true
             startWatchdog()
             true
-        } catch (_: SecurityException) {
+        } catch (error: SecurityException) {
             _isTracking.value = false
+            PersistentAppLogger.write("GPS_REQUEST_FAILED_SECURITY", error)
             false
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             _isTracking.value = false
+            PersistentAppLogger.write("GPS_REQUEST_FAILED_EXCEPTION", error)
             false
         }
     }

@@ -7,6 +7,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Single owner of the fused location subscription for foreground and background consumers. */
+enum class FirstFixResult {
+    RECEIVED,
+    START_FAILED,
+    TIMEOUT,
+}
+
 class LocationTrackingCoordinator(context: Context) {
     private val tracker = LocationTracker(context.applicationContext)
     val gpsData: StateFlow<LiveGpsData> = tracker.gpsData
@@ -16,14 +22,14 @@ class LocationTrackingCoordinator(context: Context) {
     fun start(): Boolean = if (tracker.isTracking.value) true else tracker.startLocationUpdates()
 
     /** Starts real location updates and waits for the first non-zero GPS fix. */
-    suspend fun startAndAwaitFirstFix(timeoutMs: Long = 45_000L): Boolean {
-        if (!start()) return false
+    suspend fun startAndAwaitFirstFix(timeoutMs: Long = 45_000L): FirstFixResult {
+        if (!start()) return FirstFixResult.START_FAILED
 
         if (gpsData.value.isGpsActive &&
             gpsData.value.latitude != 0.0 &&
             gpsData.value.longitude != 0.0
         ) {
-            return true
+            return FirstFixResult.RECEIVED
         }
 
         return withTimeoutOrNull(timeoutMs) {
@@ -33,8 +39,8 @@ class LocationTrackingCoordinator(context: Context) {
                     gps.longitude != 0.0 &&
                     gps.timestamp > 0L
             }
-            true
-        } ?: false
+            FirstFixResult.RECEIVED
+        } ?: FirstFixResult.TIMEOUT
     }
 
     @Synchronized

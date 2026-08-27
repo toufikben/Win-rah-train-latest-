@@ -19,6 +19,7 @@ import com.example.data.TrainRepository
 import com.example.data.remote.dto.ObservationRequest
 import com.example.data.remote.dto.ReportDto
 import com.example.data.remote.dto.ReportRequest
+import com.example.location.FirstFixResult
 import com.example.location.LocationTrackingCoordinatorProvider
 import com.example.location.TrainTrackingService
 import com.example.model.ActiveTrain
@@ -464,15 +465,22 @@ class TrainViewModel private constructor(
                     throw IllegalStateException("session_binding_mismatch")
                 }
                 PersistentAppLogger.write("GPS_FIRST_FIX_WAIT_BEGIN timeoutSeconds=45")
-                val firstFixReceived = locationTracker.startAndAwaitFirstFix(45_000L)
-                if (!firstFixReceived) {
-                    PersistentAppLogger.write("GPS_FIRST_FIX_TIMEOUT realFix=false")
-                    throw IllegalStateException("location_unavailable_timeout")
+                when (locationTracker.startAndAwaitFirstFix(45_000L)) {
+                    FirstFixResult.START_FAILED -> {
+                        PersistentAppLogger.write("GPS_START_FAILED requestAccepted=false")
+                        throw IllegalStateException("location_start_failed")
+                    }
+                    FirstFixResult.TIMEOUT -> {
+                        PersistentAppLogger.write("GPS_FIRST_FIX_TIMEOUT realFix=false timeoutSeconds=45")
+                        throw IllegalStateException("location_unavailable_timeout")
+                    }
+                    FirstFixResult.RECEIVED -> {
+                        PersistentAppLogger.write(
+                            "GPS_FIRST_FIX_RECEIVED accuracy=${locationTracker.gpsData.value.accuracyMeters} " +
+                                "timestamp=${locationTracker.gpsData.value.timestamp}"
+                        )
+                    }
                 }
-                PersistentAppLogger.write(
-                    "GPS_FIRST_FIX_RECEIVED accuracy=${locationTracker.gpsData.value.accuracyMeters} " +
-                        "timestamp=${locationTracker.gpsData.value.timestamp}"
-                )
                 _monitorBinding.value = MonitorBinding(
                     sessionId = session.id,
                     lineId = session.lineId,
@@ -507,7 +515,9 @@ class TrainViewModel private constructor(
                     "BROADCAST_ACTIVATION_FAILED detail=${describeSessionFailure(error)}",
                     error,
                 )
-                _userFeedbackMessage.value = if (error.message == "location_unavailable" || error.message == "location_unavailable_timeout") {
+                _userFeedbackMessage.value = if (error.message == "location_start_failed") {
+                    "تعذر تشغيل مستشعر GPS. فعّل الموقع على مستوى الجهاز وأوقف تقييد البطارية للتطبيق ثم حاول مجددًا."
+                } else if (error.message == "location_unavailable" || error.message == "location_unavailable_timeout") {
                     "تم إنشاء جلسة البث، لكن لم تصل إشارة GPS حقيقية خلال 45 ثانية. تحرك إلى مكان مفتوح وتأكد من تشغيل الموقع ثم حاول مجددًا."
                 } else if (error.message == "no_live_trackable_train") {
                     "لا يوجد قطار حي موثق يمكن بدء المراقبة عليه الآن."
