@@ -4,6 +4,8 @@ import com.example.data.remote.dto.LiveTrainDto
 import com.example.data.remote.dto.MonitorSessionDto
 import com.example.data.remote.dto.MonitorSessionRequest
 import com.example.data.remote.dto.ObservationRequest
+import com.example.data.remote.dto.ReportDto
+import com.example.data.remote.dto.ResumeMonitorSessionRequest
 import com.example.data.remote.dto.ReportRequest
 import com.example.data.remote.dto.StationDto
 import com.example.data.remote.dto.TripDto
@@ -41,6 +43,12 @@ interface TrainApi {
     @POST("monitor-sessions")
     suspend fun createMonitorSession(@Body request: MonitorSessionRequest): MonitorSessionDto
 
+    @POST("monitor-sessions/{session_id}/resume")
+    suspend fun resumeMonitorSession(
+        @Path("session_id") sessionId: String,
+        @Body request: ResumeMonitorSessionRequest,
+    ): MonitorSessionDto
+
     @POST("monitor-sessions/{session_id}/end")
     suspend fun endMonitorSession(@Path("session_id") sessionId: String): MonitorSessionDto
 
@@ -49,4 +57,7 @@ interface TrainApi {
 
     @POST("reports")
     suspend fun submitReport(@Body request: ReportRequest): Map<String, Any?>
+
+    @GET("reports/session/{session_id}")
+    suspend fun getReportsForSession(@Path("session_id") sessionId: String): List<ReportDto>
 }

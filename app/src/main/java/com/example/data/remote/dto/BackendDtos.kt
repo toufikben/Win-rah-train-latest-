@@ -86,6 +86,13 @@ data class MonitorSessionRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class ResumeMonitorSessionRequest(
+    @Json(name = "trip_id") val tripId: String,
+    @Json(name = "train_id") val trainId: String,
+    @Json(name = "anonymous_monitor_id") val anonymousMonitorId: String,
+)
+
+@JsonClass(generateAdapter = true)
 data class MonitorSessionDto(
     @Json(name = "id") val id: String,
     @Json(name = "trip_id") val tripId: String,
@@ -111,11 +118,24 @@ data class ObservationRequest(
 
 @JsonClass(generateAdapter = true)
 data class ReportRequest(
+    @Json(name = "session_id") val sessionId: String? = null,
     @Json(name = "train_id") val trainId: String,
     @Json(name = "trip_id") val tripId: String?,
     @Json(name = "station_id") val stationId: String?,
     @Json(name = "report_type") val reportType: String,
     @Json(name = "description") val description: String?
+)
+
+@JsonClass(generateAdapter = true)
+data class ReportDto(
+    @Json(name = "id") val id: String,
+    @Json(name = "session_id") val sessionId: String?,
+    @Json(name = "train_id") val trainId: String,
+    @Json(name = "trip_id") val tripId: String?,
+    @Json(name = "station_id") val stationId: String?,
+    @Json(name = "report_type") val reportType: String,
+    @Json(name = "description") val description: String?,
+    @Json(name = "created_at") val createdAt: String?,
 )
 
 @JsonClass(generateAdapter = true)

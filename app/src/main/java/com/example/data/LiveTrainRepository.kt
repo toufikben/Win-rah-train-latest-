@@ -1,14 +1,18 @@
 package com.example.data
 
+import android.content.Context
 import com.example.data.remote.BackendService
 import com.example.data.remote.dto.LiveTrainDto
 import com.example.data.remote.dto.MonitorSessionDto
 import com.example.data.remote.dto.MonitorSessionRequest
 import com.example.data.remote.dto.ObservationRequest
+import com.example.data.remote.dto.ReportDto
 import com.example.data.remote.dto.ReportRequest
+import com.example.data.remote.dto.ResumeMonitorSessionRequest
 import com.example.data.remote.dto.StationDto
 import com.example.data.remote.dto.TripDto
 import com.example.model.ActiveTrain
+import com.example.model.BroadcastTripOption
 import com.example.model.Station
 import com.example.model.SuburbLine
 import com.example.model.TrainDirection
@@ -21,7 +25,8 @@ data class TrackGeometry(
 )
 
 class LiveTrainRepository(
-    private val api: com.example.data.remote.TrainApi = BackendService.api
+    private val api: com.example.data.remote.TrainApi = BackendService.api,
+    private val context: Context? = null,
 ) {
     private var stationsById: Map<String, StationDto> = emptyMap()
     private var tripsById: Map<String, TripDto> = emptyMap()
@@ -38,6 +43,42 @@ class LiveTrainRepository(
         return tripsById.values
             .firstOrNull { matchesWinRahLine(line.id, it.lineId) && it.trainId != null }
             ?.let { trip -> trip.id to trip.trainId!! }
+    }
+
+    suspend fun getBroadcastTripsForLine(
+        line: SuburbLine,
+        direction: TrainDirection,
+    ): List<BroadcastTripOption> {
+        if (tripsById.isEmpty()) refreshReferenceData()
+        return tripsById.values
+            .filter { trip ->
+                matchesWinRahLine(line.id, trip.lineId) &&
+                    trip.trainId != null &&
+                    directionMatches(direction, trip.direction)
+            }
+            .sortedWith(compareBy({ it.scheduledDeparture == null }, { it.scheduledDeparture ?: "" }, { it.id }))
+            .map { trip ->
+                BroadcastTripOption(
+                    tripId = trip.id,
+                    trainId = trip.trainId!!,
+                    lineId = line.id,
+                    direction = parseDirection(trip.direction)!!,
+                    status = trip.status,
+                    scheduledDeparture = trip.scheduledDeparture,
+                    scheduledArrival = trip.scheduledArrival,
+                )
+            }
+    }
+
+    private fun directionMatches(selected: TrainDirection, backendDirection: String?): Boolean {
+        if (selected == TrainDirection.BOTH) return true
+        return parseDirection(backendDirection) == selected
+    }
+
+    private fun parseDirection(value: String?): TrainDirection? = when (value?.uppercase()) {
+        "INBOUND" -> TrainDirection.INBOUND
+        "OUTBOUND" -> TrainDirection.OUTBOUND
+        else -> null
     }
 
     suspend fun getLiveTrainsForLine(line: SuburbLine, waitingStation: Station): List<ActiveTrain> {
@@ -83,11 +124,24 @@ class LiveTrainRepository(
         )
     }
 
+    suspend fun resumeMonitorSession(sessionId: String, tripId: String, trainId: String): MonitorSessionDto =
+        api.resumeMonitorSession(
+            sessionId,
+            ResumeMonitorSessionRequest(
+                tripId = tripId,
+                trainId = trainId,
+                anonymousMonitorId = getAnonymousMonitorId(),
+            ),
+        )
+
     suspend fun endMonitorSession(sessionId: String): MonitorSessionDto =
         api.endMonitorSession(sessionId)
 
-    suspend fun submitObservation(request: ObservationRequest) {
-        api.submitObservation(request)
+    suspend fun getReportsForSession(sessionId: String): List<ReportDto> =
+        api.getReportsForSession(sessionId)
+
+    suspend fun submitObservation(request: ObservationRequest): Map<String, Any?> {
+        return api.submitObservation(request)
     }
 
     suspend fun submitReport(request: ReportRequest) {
@@ -254,6 +308,12 @@ class LiveTrainRepository(
             .replace("ـ", "")
             .replace(" ", "")
 
-    private fun getAnonymousMonitorId(): String =
-        "android-${UUID.randomUUID()}"
+    private fun getAnonymousMonitorId(): String {
+        val preferences = context?.getSharedPreferences("winrah_identity", Context.MODE_PRIVATE)
+        val existing = preferences?.getString("anonymous_monitor_id", null)
+        if (!existing.isNullOrBlank()) return existing
+        val generated = "android-${UUID.randomUUID()}"
+        preferences?.edit()?.putString("anonymous_monitor_id", generated)?.apply()
+        return generated
+    }
 }

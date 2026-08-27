@@ -2,11 +2,13 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewModelScope
 import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
@@ -14,11 +16,17 @@ import com.example.data.LiveTrainRepository
 import com.example.data.TrackGeometry
 import com.example.data.TrainRepository
 import com.example.data.remote.dto.ObservationRequest
+import com.example.data.remote.dto.ReportDto
 import com.example.data.remote.dto.ReportRequest
-import com.example.location.LocationTracker
+import com.example.location.LocationTrackingCoordinatorProvider
+import com.example.location.TrainTrackingService
 import com.example.model.ActiveTrain
 import com.example.model.AlertSeverity
+import com.example.model.BroadcastSelection
+import com.example.model.BroadcastTripOption
 import com.example.model.CrowdingLevel
+import com.example.model.CorridorExitPolicy
+import com.example.model.CorridorExitState
 import com.example.model.CrowdsourcedReport
 import com.example.model.DelayLevel
 import com.example.model.DestinationAlarm
@@ -34,6 +42,7 @@ import com.example.model.TrainDirection
 import com.example.model.TransitConnection
 import com.example.model.TransitType
 import com.example.model.VerificationStatus
+import com.example.model.WaitingSelection
 import com.example.notification.TrainNotificationHelper
 import com.example.utils.GeoUtils
 import kotlinx.coroutines.Dispatchers
@@ -62,11 +71,11 @@ class TrainViewModel private constructor(
     constructor(app: Application) : this(
         app,
         true,
-        LiveTrainRepository()
+        LiveTrainRepository(context = app)
     )
-    constructor(app: Application, enableLivePolling: Boolean) : this(app, enableLivePolling, LiveTrainRepository())
+    constructor(app: Application, enableLivePolling: Boolean) : this(app, enableLivePolling, LiveTrainRepository(context = app))
 
-    private val locationTracker = LocationTracker(app)
+    private val locationTracker = LocationTrackingCoordinatorProvider.get(app)
     private val localPrefs = app.getSharedPreferences("winrah_local_state", Context.MODE_PRIVATE)
 
     val gpsData: StateFlow<LiveGpsData> = locationTracker.gpsData
@@ -95,6 +104,27 @@ class TrainViewModel private constructor(
     // 4. DIRECTION & PLATFORM FILTERING
     private val _selectedDirectionFilter = MutableStateFlow(TrainDirection.BOTH)
     val selectedDirectionFilter: StateFlow<TrainDirection> = _selectedDirectionFilter.asStateFlow()
+
+    // Broadcast selection is independent from the station used for passenger alerts.
+    private val _broadcastSelection = MutableStateFlow<BroadcastSelection?>(null)
+    val broadcastSelection: StateFlow<BroadcastSelection?> = _broadcastSelection.asStateFlow()
+
+    private val _waitingSelection = MutableStateFlow(
+        WaitingSelection(
+            lineId = _selectedSuburb.value.id,
+            stationId = _selectedStation.value.id,
+        )
+    )
+    val waitingSelection: StateFlow<WaitingSelection> = _waitingSelection.asStateFlow()
+
+    private val _broadcastLine = MutableStateFlow(_selectedSuburb.value)
+    val broadcastLine: StateFlow<SuburbLine> = _broadcastLine.asStateFlow()
+
+    private val _broadcastDirection = MutableStateFlow(TrainDirection.INBOUND)
+    val broadcastDirection: StateFlow<TrainDirection> = _broadcastDirection.asStateFlow()
+
+    private val _broadcastTrips = MutableStateFlow<List<BroadcastTripOption>>(emptyList())
+    val broadcastTrips: StateFlow<List<BroadcastTripOption>> = _broadcastTrips.asStateFlow()
 
     private val _verificationStatus = MutableStateFlow(VerificationStatus.WAITING_GPS)
     val verificationStatus: StateFlow<VerificationStatus> = _verificationStatus.asStateFlow()
@@ -198,7 +228,12 @@ class TrainViewModel private constructor(
     private var liveRefreshJob: Job? = null
     private val _monitorBinding = MutableStateFlow<MonitorBinding?>(null)
     val monitorBinding: StateFlow<MonitorBinding?> = _monitorBinding.asStateFlow()
+    private val _activeSessionReports = MutableStateFlow<List<ReportDto>>(emptyList())
+    val activeSessionReports: StateFlow<List<ReportDto>> = _activeSessionReports.asStateFlow()
     private var lastObservationSentAt = 0L
+    private var corridorExitState = CorridorExitState()
+    private val _lastObservationAcceptedAt = MutableStateFlow<Long?>(null)
+    val lastObservationAcceptedAt: StateFlow<Long?> = _lastObservationAcceptedAt.asStateFlow()
 
     init {
         restoreLocalState()
@@ -252,18 +287,95 @@ class TrainViewModel private constructor(
 
     fun selectSuburb(suburb: SuburbLine) {
         _selectedSuburb.value = suburb
-        _selectedStation.value = suburb.stations.getOrElse(1) { suburb.stations.first() }
+        val defaultStation = suburb.stations.getOrElse(1) { suburb.stations.first() }
+        _selectedStation.value = defaultStation
+        _waitingSelection.value = WaitingSelection(
+            lineId = suburb.id,
+            stationId = defaultStation.id,
+            trainId = _waitingSelection.value.trainId,
+        )
         recalculateActiveTrains()
     }
 
     fun selectStation(station: Station) {
         _selectedStation.value = station
+        _waitingSelection.value = _waitingSelection.value.copy(
+            lineId = _selectedSuburb.value.id,
+            stationId = station.id,
+        )
         recalculateActiveTrains()
         checkApproachingTrain()
     }
 
+    /** Selection used by the waiting/monitoring view only; it never changes broadcastSelection. */
     fun selectTrain(train: ActiveTrain?) {
         _selectedTrain.value = train
+        _waitingSelection.value = _waitingSelection.value.copy(trainId = train?.id)
+    }
+
+    fun setBroadcastSelection(selection: BroadcastSelection?) {
+        _broadcastSelection.value = selection
+    }
+
+    /** Changes only the route used for broadcasting; waiting station state remains untouched. */
+    fun selectBroadcastSuburb(suburb: SuburbLine) {
+        if (_isOnboardMode.value || _isOnboardActivationPending.value) {
+            _userFeedbackMessage.value = "أوقف بث الموقع الحالي قبل تغيير مسار البث."
+            return
+        }
+        if (_broadcastLine.value.id == suburb.id) return
+        _broadcastLine.value = suburb
+        _broadcastSelection.value = null
+        refreshBroadcastTrips()
+    }
+
+    fun selectBroadcastDirection(direction: TrainDirection) {
+        if (_isOnboardMode.value || _isOnboardActivationPending.value) {
+            _userFeedbackMessage.value = "أوقف بث الموقع الحالي قبل تغيير اتجاه البث."
+            return
+        }
+        if (direction == TrainDirection.BOTH) return
+        _broadcastDirection.value = direction
+        _broadcastSelection.value = null
+        refreshBroadcastTrips()
+    }
+
+    fun selectBroadcastTrip(option: BroadcastTripOption?) {
+        if (_isOnboardMode.value || _isOnboardActivationPending.value) {
+            _userFeedbackMessage.value = "أوقف بث الموقع الحالي قبل تغيير الرحلة."
+            return
+        }
+        _broadcastSelection.value = option?.let {
+            BroadcastSelection(
+                lineId = it.lineId,
+                direction = it.direction,
+                tripId = it.tripId,
+                trainId = it.trainId,
+            )
+        }
+    }
+
+    fun refreshBroadcastTrips() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                liveTrainRepository.getBroadcastTripsForLine(
+                    _broadcastLine.value,
+                    _broadcastDirection.value,
+                )
+            }.onSuccess { trips ->
+                _broadcastTrips.value = trips
+                if (_broadcastSelection.value?.tripId !in trips.map { it.tripId }) {
+                    _broadcastSelection.value = null
+                }
+            }.onFailure {
+                _broadcastTrips.value = emptyList()
+                _broadcastSelection.value = null
+            }
+        }
+    }
+
+    fun clearBroadcastSelection() {
+        _broadcastSelection.value = null
     }
 
     fun setDirectionFilter(direction: TrainDirection) {
@@ -275,8 +387,11 @@ class TrainViewModel private constructor(
         if (!enable) {
             val binding = _monitorBinding.value
             _monitorBinding.value = null
+            _activeSessionReports.value = emptyList()
+            corridorExitState = CorridorExitState()
             _isOnboardActivationPending.value = false
-            locationTracker.stopLocationUpdates()
+            locationTracker.stop()
+            stopTrainTrackingService()
             TrainNotificationHelper.clearOngoingNotification(app)
             _isOnboardMode.value = false
             _verificationStatus.value = VerificationStatus.WAITING_GPS
@@ -295,15 +410,13 @@ class TrainViewModel private constructor(
             _userFeedbackMessage.value = "وضع الاختبار المحلي لا يشغّل البث الشبكي."
             return false
         }
-        val liveTrain = _activeTrains.value.firstOrNull {
-            !it.id.isBlank() && !it.tripId.isNullOrBlank()
-        }
         viewModelScope.launch(Dispatchers.IO) {
             var createdSessionId: String? = null
             try {
-                val train = liveTrain ?: throw IllegalStateException("no_live_trackable_train")
-                val requestedTripId = train.tripId!!
-                val requestedTrainId = train.id
+                val selection = _broadcastSelection.value
+                    ?: throw IllegalStateException("broadcast_selection_required")
+                val requestedTripId = selection.tripId
+                val requestedTrainId = selection.trainId
                 val session = liveTrainRepository.createMonitorSession(
                     tripId = requestedTripId,
                     trainId = requestedTrainId
@@ -312,7 +425,7 @@ class TrainViewModel private constructor(
                 if (session.tripId != requestedTripId || session.trainId != requestedTrainId) {
                     throw IllegalStateException("session_binding_mismatch")
                 }
-                if (!locationTracker.startLocationUpdates()) {
+                if (!locationTracker.start()) {
                     throw IllegalStateException("location_unavailable")
                 }
                 _monitorBinding.value = MonitorBinding(
@@ -320,6 +433,9 @@ class TrainViewModel private constructor(
                     tripId = session.tripId,
                     trainId = session.trainId
                 )
+                _activeSessionReports.value = emptyList()
+                refreshActiveSessionReports()
+                startTrainTrackingService(session.id, session.tripId, session.trainId)
                 _isOnboardMode.value = true
                 _isOnboardActivationPending.value = false
                 _userFeedbackMessage.value = "تم بدء البث الحقيقي من جهازك بعد إنشاء جلسة المراقبة."
@@ -328,14 +444,18 @@ class TrainViewModel private constructor(
                     runCatching { liveTrainRepository.endMonitorSession(createdSessionId) }
                 }
                 _monitorBinding.value = null
+                _activeSessionReports.value = emptyList()
                 _isOnboardMode.value = false
                 _isOnboardActivationPending.value = false
-                locationTracker.stopLocationUpdates()
+                locationTracker.stop()
+                stopTrainTrackingService()
                 _verificationStatus.value = VerificationStatus.WAITING_GPS
                 _userFeedbackMessage.value = if (error.message == "location_unavailable") {
                     "تعذر بدء الموقع. تحقق من صلاحية GPS وإشارة الجهاز."
                 } else if (error.message == "no_live_trackable_train") {
                     "لا يوجد قطار حي موثق يمكن بدء المراقبة عليه الآن."
+                } else if (error.message == "broadcast_selection_required") {
+                    "اختر الضاحية والاتجاه والرحلة والقطار قبل بدء البث."
                 } else if (error.message == "session_binding_mismatch") {
                     "رفض الخادم جلسة لا تطابق القطار المطلوب؛ لم يبدأ البث."
                 } else {
@@ -346,8 +466,45 @@ class TrainViewModel private constructor(
         return true
     }
 
+    private fun startTrainTrackingService(sessionId: String, tripId: String, trainId: String) {
+        val intent = Intent(app, TrainTrackingService::class.java).apply {
+            action = TrainTrackingService.ACTION_START
+            putExtra(TrainTrackingService.EXTRA_SESSION_ID, sessionId)
+            putExtra(TrainTrackingService.EXTRA_TRIP_ID, tripId)
+            putExtra(TrainTrackingService.EXTRA_TRAIN_ID, trainId)
+        }
+        runCatching { ContextCompat.startForegroundService(app, intent) }
+            .onFailure { _userFeedbackMessage.value = "تعذر تشغيل التتبع في الخلفية؛ سيستمر التتبع أثناء فتح التطبيق." }
+    }
+
+    private fun stopTrainTrackingService() {
+        val intent = Intent(app, TrainTrackingService::class.java).apply {
+            action = TrainTrackingService.ACTION_STOP
+        }
+        runCatching { app.stopService(intent) }
+    }
+
+    fun refreshActiveSessionReports() {
+        val sessionId = _monitorBinding.value?.sessionId
+        if (sessionId == null) {
+            _activeSessionReports.value = emptyList()
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { liveTrainRepository.getReportsForSession(sessionId) }
+                .onSuccess { reports ->
+                    if (_monitorBinding.value?.sessionId == sessionId) {
+                        _activeSessionReports.value = reports
+                    }
+                }
+                .onFailure {
+                    _userFeedbackMessage.value = "تعذر تحميل تقارير جلسة البث الحالية."
+                }
+        }
+    }
+
     fun refreshGpsLocation() {
-        locationTracker.startLocationUpdates()
+        locationTracker.start()
     }
 
     fun clearApproachingAlert() {
@@ -378,7 +535,7 @@ class TrainViewModel private constructor(
             isTriggered = false,
             remainingDistanceKm = 0.0f
         )
-        locationTracker.startLocationUpdates()
+        locationTracker.start()
         _userFeedbackMessage.value = "تم تفعيل منبه النزول لمحطة (${station.name}) - سنوقظك قبل ${alertDistanceKm} كم! ⏰"
     }
 
@@ -497,19 +654,27 @@ class TrainViewModel private constructor(
             _userFeedbackMessage.value = "ابدأ بثًا حيًا موثقًا قبل إرسال إفادة من وضع الراكب."
             return
         }
-        submitEvidenceReport(binding.trainId, binding.tripId, reportType, description)
+        submitEvidenceReport(
+            trainId = binding.trainId,
+            tripId = binding.tripId,
+            reportType = reportType,
+            description = description,
+            sessionId = binding.sessionId,
+        )
     }
 
     private fun submitEvidenceReport(
         trainId: String,
         tripId: String?,
         reportType: String,
-        description: String
+        description: String,
+        sessionId: String? = null,
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 liveTrainRepository.submitReport(
                     ReportRequest(
+                        sessionId = sessionId,
                         trainId = trainId,
                         tripId = tripId,
                         stationId = liveTrainRepository.canonicalStationId(_selectedStation.value),
@@ -517,6 +682,7 @@ class TrainViewModel private constructor(
                         description = description
                     )
                 )
+                refreshActiveSessionReports()
                 _userFeedbackMessage.value = "تم إرسال الإفادة إلى الخادم كبيان من مستخدمين، شكرًا لمساهمتك."
             } catch (_: Exception) {
                 _userFeedbackMessage.value = "تعذر إرسال الإفادة الآن. تحقق من الاتصال وحاول مجددًا."
@@ -732,7 +898,11 @@ class TrainViewModel private constructor(
     }
 
     private fun verifyPassengerLocation(gps: LiveGpsData) {
-        val stations = _selectedSuburb.value.stations
+        val stations = if (_isOnboardMode.value) {
+            _broadcastLine.value.stations
+        } else {
+            _selectedSuburb.value.stations
+        }
         val corridorDistMeters = GeoUtils.findClosestRailwaySegmentDistanceMeters(
             gps.latitude,
             gps.longitude,
@@ -740,16 +910,37 @@ class TrainViewModel private constructor(
         )
         _distanceToRailwayCorridorMeters.value = corridorDistMeters
 
-        if (gps.isDeadReckoning) {
-            _verificationStatus.value = VerificationStatus.TUNNEL_DEAD_RECKONING
-        } else if (corridorDistMeters <= 400.0) {
-            if (gps.speedKmh >= 12.0f) {
-                _verificationStatus.value = VerificationStatus.ON_TRACK_VERIFIED
-            } else {
-                _verificationStatus.value = VerificationStatus.STATIONARY
+        val decision = CorridorExitPolicy.evaluate(
+            distanceMeters = corridorDistMeters,
+            isDeadReckoning = gps.isDeadReckoning,
+            isBroadcasting = _isOnboardMode.value,
+            nowMs = System.currentTimeMillis(),
+            previous = corridorExitState,
+        )
+        corridorExitState = decision.state
+
+        when {
+            gps.isDeadReckoning -> {
+                _verificationStatus.value = VerificationStatus.TUNNEL_DEAD_RECKONING
             }
-        } else {
-            _verificationStatus.value = VerificationStatus.OUT_OF_CORRIDOR
+            corridorDistMeters <= CorridorExitPolicy.CORRIDOR_EXIT_DISTANCE_METERS -> {
+                _verificationStatus.value = if (gps.speedKmh >= 12.0f) {
+                    VerificationStatus.ON_TRACK_VERIFIED
+                } else {
+                    VerificationStatus.STATIONARY
+                }
+            }
+            decision.shouldStopBroadcast -> {
+                toggleOnboardMode(false)
+                _verificationStatus.value = VerificationStatus.WAITING_GPS
+                _userFeedbackMessage.value = "تم إيقاف بث الموقع تلقائيًا: ابتعد جهازك عن ممر السكة الحديدية."
+            }
+            _isOnboardMode.value -> {
+                _verificationStatus.value = VerificationStatus.OUT_OF_CORRIDOR
+            }
+            else -> {
+                _verificationStatus.value = VerificationStatus.WAITING_GPS
+            }
         }
     }
 
@@ -763,7 +954,7 @@ class TrainViewModel private constructor(
         lastObservationSentAt = now
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                liveTrainRepository.submitObservation(
+                val response = liveTrainRepository.submitObservation(
                     ObservationRequest(
                         sessionId = binding.sessionId,
                         tripId = binding.tripId,
@@ -776,8 +967,16 @@ class TrainViewModel private constructor(
                         timestamp = if (gps.timestamp > 0L) gps.timestamp else now
                     )
                 )
+                if (response["accepted"] != true) {
+                    throw IllegalStateException("observation_not_accepted")
+                }
+                _lastObservationAcceptedAt.value = now
             }.onFailure {
-                _userFeedbackMessage.value = "تعذر إرسال آخر ملاحظة للمصدر الحي؛ ستستمر المحاولة تلقائياً."
+                _userFeedbackMessage.value = if (it.message == "observation_not_accepted") {
+                    "رفض الخادم آخر ملاحظة GPS؛ ستتم إعادة المحاولة تلقائيًا."
+                } else {
+                    "تعذر إرسال آخر ملاحظة للمصدر الحي؛ ستستمر المحاولة تلقائياً."
+                }
             }
         }
     }
@@ -806,6 +1005,14 @@ class TrainViewModel private constructor(
                         train.direction == _selectedDirectionFilter.value
                 }
                 _activeTrains.value = trains
+                if (trains.isEmpty()) {
+                    val trackableTrip = liveTrainRepository.getTrackableTripForLine(_selectedSuburb.value)
+                    _liveDataError.value = if (trackableTrip == null) {
+                        "لا توجد رحلات متاحة حاليًا لهذا المسار. غيّر الضاحية أو الاتجاه وحاول لاحقًا."
+                    } else {
+                        "الرحلة موجودة، لكن لا توجد بيانات موقع حي حاليًا. لا يمكن عرض قطار حتى تصل ملاحظة GPS حقيقية."
+                    }
+                }
                 checkApproachingTrain()
             } catch (_: Exception) {
                 _activeTrains.value = emptyList()
@@ -884,7 +1091,8 @@ class TrainViewModel private constructor(
 
     override fun onCleared() {
         super.onCleared()
-        locationTracker.stopLocationUpdates()
+        locationTracker.stop()
+        stopTrainTrackingService()
         TrainNotificationHelper.clearOngoingNotification(app)
         liveRefreshJob?.cancel()
     }
