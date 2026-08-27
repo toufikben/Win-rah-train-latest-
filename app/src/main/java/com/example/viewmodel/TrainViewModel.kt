@@ -463,9 +463,16 @@ class TrainViewModel private constructor(
                 if (session.tripId != requestedTripId || session.trainId != requestedTrainId) {
                     throw IllegalStateException("session_binding_mismatch")
                 }
-                if (!locationTracker.start()) {
-                    throw IllegalStateException("location_unavailable")
+                PersistentAppLogger.write("GPS_FIRST_FIX_WAIT_BEGIN timeoutSeconds=45")
+                val firstFixReceived = locationTracker.startAndAwaitFirstFix(45_000L)
+                if (!firstFixReceived) {
+                    PersistentAppLogger.write("GPS_FIRST_FIX_TIMEOUT realFix=false")
+                    throw IllegalStateException("location_unavailable_timeout")
                 }
+                PersistentAppLogger.write(
+                    "GPS_FIRST_FIX_RECEIVED accuracy=${locationTracker.gpsData.value.accuracyMeters} " +
+                        "timestamp=${locationTracker.gpsData.value.timestamp}"
+                )
                 _monitorBinding.value = MonitorBinding(
                     sessionId = session.id,
                     lineId = session.lineId,
@@ -500,8 +507,8 @@ class TrainViewModel private constructor(
                     "BROADCAST_ACTIVATION_FAILED detail=${describeSessionFailure(error)}",
                     error,
                 )
-                _userFeedbackMessage.value = if (error.message == "location_unavailable") {
-                    "تعذر بدء الموقع. تحقق من صلاحية GPS وإشارة الجهاز."
+                _userFeedbackMessage.value = if (error.message == "location_unavailable" || error.message == "location_unavailable_timeout") {
+                    "تم إنشاء جلسة البث، لكن لم تصل إشارة GPS حقيقية خلال 45 ثانية. تحرك إلى مكان مفتوح وتأكد من تشغيل الموقع ثم حاول مجددًا."
                 } else if (error.message == "no_live_trackable_train") {
                     "لا يوجد قطار حي موثق يمكن بدء المراقبة عليه الآن."
                 } else if (error.message == "broadcast_selection_required") {
