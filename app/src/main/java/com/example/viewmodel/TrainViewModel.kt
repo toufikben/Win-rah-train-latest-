@@ -817,7 +817,7 @@ class TrainViewModel private constructor(
                 )
                 refreshActiveSessionReports()
                 if (sessionId != null) {
-                    persistReportSelection(sessionId, reportType)
+                    persistReportSelection(sessionId)
                 }
                 PersistentAppLogger.write(
                     "REPORT_SUBMIT_SUCCESS sessionId=${sessionId ?: "none"} trainId=${trainId ?: "none"} type=$reportType"
@@ -1008,6 +1008,7 @@ class TrainViewModel private constructor(
             )
             if (error is HttpException && error.code() in setOf(404, 409)) {
                 monitorSessionStore.clear()
+                clearPersistedReportSelections()
             }
             return
         }
@@ -1074,7 +1075,7 @@ class TrainViewModel private constructor(
         _favoriteStations.value = restored
     }
 
-    private fun persistReportSelection(sessionId: String, reportType: String) {
+    private fun persistReportSelection(sessionId: String) {
         localPrefs.edit()
             .putString("report_state_session_id", sessionId)
             .putString("report_crowding", _selectedCrowdingReport.value?.name)
