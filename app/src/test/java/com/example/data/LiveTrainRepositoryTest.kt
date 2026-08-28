@@ -5,7 +5,9 @@ import com.example.data.remote.dto.LiveTrainDto
 import com.example.data.remote.dto.MonitorSessionDto
 import com.example.data.remote.dto.MonitorSessionRequest
 import com.example.data.remote.dto.ObservationRequest
+import com.example.data.remote.dto.ReportDto
 import com.example.data.remote.dto.ReportRequest
+import com.example.data.remote.dto.ResumeMonitorSessionRequest
 import com.example.data.remote.dto.RailwaySegmentsResponse
 import com.example.data.remote.dto.StationDto
 import com.example.data.remote.dto.TripDto
@@ -126,6 +128,11 @@ class LiveTrainRepositoryTest {
         override suspend fun createMonitorSession(request: MonitorSessionRequest): MonitorSessionDto =
             error("not used")
 
+        override suspend fun resumeMonitorSession(
+            sessionId: String,
+            request: ResumeMonitorSessionRequest,
+        ): MonitorSessionDto = error("not used")
+
         override suspend fun endMonitorSession(sessionId: String): MonitorSessionDto =
             error("not used")
 
@@ -134,5 +141,7 @@ class LiveTrainRepositoryTest {
 
         override suspend fun submitReport(request: ReportRequest): Map<String, Any?> =
             error("not used")
+
+        override suspend fun getReportsForSession(sessionId: String): List<ReportDto> = emptyList()
     }
 }

@@ -53,6 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -69,6 +70,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.CrowdingLevel
+import com.example.model.TrainDirection
 import com.example.model.DelayLevel
 import com.example.model.Station
 import com.example.model.VerificationStatus
@@ -99,11 +101,24 @@ fun OnboardScreen(viewModel: TrainViewModel) {
     val corridorDistMeters by viewModel.distanceToRailwayCorridorMeters.collectAsState()
     val selectedSuburb by viewModel.selectedSuburb.collectAsState()
     val selectedStation by viewModel.selectedStation.collectAsState()
+    val broadcastLine by viewModel.broadcastLine.collectAsState()
+    val suburbs by viewModel.suburbs.collectAsState()
+    val broadcastDirection by viewModel.broadcastDirection.collectAsState()
+    val broadcastTrips by viewModel.broadcastTrips.collectAsState()
+    val broadcastSelection by viewModel.broadcastSelection.collectAsState()
+    val monitorBinding by viewModel.monitorBinding.collectAsState()
+    val reportsEnabled = monitorBinding != null
+    val activeSessionReports by viewModel.activeSessionReports.collectAsState()
     val feedbackMsg by viewModel.userFeedbackMessage.collectAsState()
     val selectedInterchange by viewModel.selectedInterchange.collectAsState()
     val destinationAlarm by viewModel.destinationAlarm.collectAsState()
     val scrollState = rememberScrollState()
 
+    LaunchedEffect(monitorBinding?.sessionId, isOnboard) {
+        if (isOnboard && monitorBinding != null) {
+            viewModel.refreshActiveSessionReports()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -113,8 +128,9 @@ fun OnboardScreen(viewModel: TrainViewModel) {
         val permissionGranted = fineGranted || coarseGranted
         if (permissionGranted) {
             hasLocationPermission = true
-            viewModel.toggleOnboardMode(true)
-            viewModel.setUserFeedback("تم السماح بالموقع. جارٍ إنشاء جلسة البث المباشر...")
+            // Granting GPS permission must not start broadcasting by itself.
+            // The user must explicitly press the broadcast button after choosing the trip/train.
+            viewModel.setUserFeedback("تم السماح بالموقع. اضغط بدء البث عندما تكون داخل القطار.")
         } else {
             hasLocationPermission = false
             viewModel.setUserFeedback("لم يتم تفعيل المستشعر: يجب السماح بصلاحية الموقع أولًا.")
@@ -126,6 +142,13 @@ fun OnboardScreen(viewModel: TrainViewModel) {
     }
     var alarmDistanceKm by remember { mutableFloatStateOf(destinationAlarm.alertDistanceKm) }
     var stationMenuExpanded by remember { mutableStateOf(false) }
+    var broadcastLineMenuExpanded by remember { mutableStateOf(false) }
+    var broadcastDirectionMenuExpanded by remember { mutableStateOf(false) }
+    var broadcastTripMenuExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshBroadcastTrips()
+    }
 
     Column(
         modifier = Modifier
@@ -144,6 +167,142 @@ fun OnboardScreen(viewModel: TrainViewModel) {
             style = MaterialTheme.typography.bodySmall,
             color = Color(0xFF94A3B8)
         )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // BROADCAST SELECTION: independent from waiting-station selection.
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E3A8A))
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "اختيار مسار واتجاه بث الموقع",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = "اختر المسار والاتجاه. اختيار رحلة أو قطار محدد اختياري لتحسين الربط.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF94A3B8)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                ExposedDropdownMenuBox(
+                    expanded = broadcastLineMenuExpanded,
+                    onExpandedChange = { broadcastLineMenuExpanded = !broadcastLineMenuExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = broadcastLine.name,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("الضاحية / المسار") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(broadcastLineMenuExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    ExposedDropdownMenu(
+                        expanded = broadcastLineMenuExpanded,
+                        onDismissRequest = { broadcastLineMenuExpanded = false }
+                    ) {
+                        suburbs.forEach { suburb ->
+                            DropdownMenuItem(
+                                text = { Text(suburb.name) },
+                                onClick = {
+                                    viewModel.selectBroadcastSuburb(suburb)
+                                    broadcastLineMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                ExposedDropdownMenuBox(
+                    expanded = broadcastDirectionMenuExpanded,
+                    onExpandedChange = { broadcastDirectionMenuExpanded = !broadcastDirectionMenuExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = broadcastDirection.titleAr,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("الاتجاه") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(broadcastDirectionMenuExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    ExposedDropdownMenu(
+                        expanded = broadcastDirectionMenuExpanded,
+                        onDismissRequest = { broadcastDirectionMenuExpanded = false }
+                    ) {
+                        listOf(TrainDirection.INBOUND, TrainDirection.OUTBOUND).forEach { direction ->
+                            DropdownMenuItem(
+                                text = { Text(direction.titleAr) },
+                                onClick = {
+                                    viewModel.selectBroadcastDirection(direction)
+                                    broadcastDirectionMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val selectedTrip = broadcastTrips.firstOrNull { it.tripId == broadcastSelection?.tripId }
+                ExposedDropdownMenuBox(
+                    expanded = broadcastTripMenuExpanded,
+                    onExpandedChange = { broadcastTripMenuExpanded = !broadcastTripMenuExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = selectedTrip?.let { "قطار ${it.trainId.take(8)} • ${it.direction.titleAr}" } ?: "لم تُختر رحلة",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("قطار محدد (اختياري)") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(broadcastTripMenuExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    ExposedDropdownMenu(
+                        expanded = broadcastTripMenuExpanded,
+                        onDismissRequest = { broadcastTripMenuExpanded = false }
+                    ) {
+                        if (broadcastTrips.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("لا توجد رحلات متاحة لهذا المسار والاتجاه") },
+                                onClick = { broadcastTripMenuExpanded = false }
+                            )
+                        } else {
+                            broadcastTrips.forEach { trip ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("قطار ${trip.trainId.take(8)} • ${trip.status ?: "الحالة غير متوفرة"}")
+                                    },
+                                    onClick = {
+                                        viewModel.selectBroadcastTrip(trip)
+                                        broadcastTripMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (broadcastTrips.isEmpty()) {
+                        "لا توجد قطارات حية الآن؛ يمكنك بدء بث المسار والاتجاه وانتظار البيانات الحقيقية."
+                    } else if (broadcastSelection == null) {
+                        "يمكنك بدء بث المسار والاتجاه دون اختيار قطار."
+                    } else {
+                        "تم اختيار رحلة حقيقية؛ يمكنك بدء البث بعد تفعيل صلاحية الموقع."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (broadcastTrips.isEmpty()) Color(0xFFFBBF24) else Color(0xFF94A3B8)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -269,8 +428,9 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             text = when {
                                 isOnboardActivationPending -> "جارٍ تفعيل بث المستشعر..."
                                 isOnboard -> "بث الموقع الحي مفعّل"
-                                hasLocationPermission -> "صلاحية الموقع مفعّلة — البث ينتظر قطارًا حيًا"
-                                else -> "تفعيل بث المستشعر المباشر"
+                                broadcastSelection == null -> "اختر المسار والاتجاه أولًا"
+                                hasLocationPermission -> "البث متوقف — جاهز للبدء"
+                                else -> "فعّل صلاحية GPS أولًا"
                             },
 
                         style = MaterialTheme.typography.bodyMedium,
@@ -289,13 +449,10 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                         onClick = {
                             if (isOnboard) {
                                 viewModel.toggleOnboardMode(false)
+                            } else if (broadcastSelection == null) {
+                                viewModel.setUserFeedback("اختر الضاحية والاتجاه قبل بدء البث. القطار اختياري.")
                             } else if (!hasLocationPermission) {
-                                permissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                        Manifest.permission.ACCESS_COARSE_LOCATION
-                                    )
-                                )
+                                viewModel.setUserFeedback("فعّل صلاحية GPS من زر صلاحية الموقع أولًا.")
                             } else {
                                 viewModel.toggleOnboardMode(true)
                             }
@@ -307,7 +464,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             containerColor = when {
                                 isOnboard -> Color(0xFF059669)
                                 isOnboardActivationPending -> Color(0xFF475569)
-                                hasLocationPermission -> Color(0xFF0369A1)
+                                hasLocationPermission && broadcastSelection != null -> Color(0xFF0369A1)
                                 else -> Color(0xFF1E293B)
                             },
                             contentColor = Color.White,
@@ -327,7 +484,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                                 isOnboard -> "إيقاف البث"
                                 isOnboardActivationPending -> "جارٍ التفعيل"
                                 hasLocationPermission -> "بدء البث"
-                                else -> "السماح بالموقع"
+                                else -> "بدء البث"
                             },
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
@@ -346,17 +503,50 @@ fun OnboardScreen(viewModel: TrainViewModel) {
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
         ) {
-            Row(
-                modifier = Modifier.padding(14.dp).fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = "GPS", fontSize = 18.sp, color = Color(0xFF38BDF8))
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = if (gpsData.isGpsActive) "الموقع الحقيقي متاح؛ لا يوجد تقدير اصطناعي عند فقدان الإشارة." else "في انتظار الموقع الحقيقي من الجهاز.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color(0xFFCBD5E1)
-                )
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "GPS", fontSize = 18.sp, color = Color(0xFF38BDF8))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (gpsData.isGpsActive) "الموقع الحقيقي متاح؛ لا يوجد تقدير اصطناعي عند فقدان الإشارة." else "في انتظار الموقع الحقيقي من الجهاز.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFFCBD5E1),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        if (!hasLocationPermission) {
+                            permissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        } else {
+                            viewModel.setUserFeedback("صلاحية GPS مفعّلة. هذا الزر لا يبدأ البث؛ استخدم زر بدء البث بشكل مستقل.")
+                        }
+                    },
+                    enabled = !isOnboardActivationPending,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (hasLocationPermission) Color(0xFF065F46) else Color(0xFF334155),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (hasLocationPermission) Icons.Default.CheckCircle else Icons.Default.GpsFixed,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (hasLocationPermission) "صلاحية الموقع مفعّلة" else "السماح بالموقع فقط")
+                }
             }
         }
 
@@ -607,6 +797,18 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
+                    text = if (reportsEnabled) {
+                        "يمكنك الآن مشاركة حالة القطار"
+                    } else {
+                        "ابدأ بث موقعك أولًا لتفعيل تقارير الاكتظاظ والتأخير"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (reportsEnabled) Color(0xFF86EFAC) else Color(0xFFFBBF24)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
                     text = "مدى الاكتظاظ في عربتك:",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
@@ -622,11 +824,12 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                         val isSelected = selectedCrowdingReport == level
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(level.colorHex).copy(alpha = 0.28f) else Color(0xFF1E293B),
-                            border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, Color(level.colorHex)),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable(enabled = !isSelected) {
+                                                            color = if (isSelected) Color(level.colorHex).copy(alpha = 0.28f) else Color(0xFF1E293B).copy(alpha = if (reportsEnabled) 1f else 0.55f),
+                                border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, Color(level.colorHex).copy(alpha = if (reportsEnabled) 1f else 0.45f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable(enabled = reportsEnabled && !isSelected) {
+
                                     viewModel.submitCrowdingReport(level)
                                 }
                         ) {
@@ -665,11 +868,12 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                         val isSelected = selectedDelayReport == delayLevel
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.30f) else Color(0xFF1E293B),
-                            border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF60A5FA) else Color(0xFF475569)),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable(enabled = !isSelected) {
+                                                            color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.30f) else Color(0xFF1E293B).copy(alpha = if (reportsEnabled) 1f else 0.55f),
+                                border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF60A5FA) else Color(0xFF475569).copy(alpha = if (reportsEnabled) 1f else 0.45f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable(enabled = reportsEnabled && !isSelected) {
+
                                     viewModel.submitDelayReport(delayLevel)
                                 }
                         ) {
@@ -687,6 +891,86 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                                 )
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // SESSION REPORT BROWSER: visible only for the active broadcast session.
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.outlinedCardColors(containerColor = Color(0xFF0F172A))
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "تقارير جلسة البث",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = if (isOnboard) "مباشرة" else "غير نشطة",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isOnboard) Color(0xFF34D399) else Color(0xFF94A3B8)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                if (!isOnboard || monitorBinding == null) {
+                    Text(
+                        text = "تظهر هنا التقارير المرتبطة بجلسة البث الحالية فقط.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF94A3B8)
+                    )
+                } else if (activeSessionReports.isEmpty()) {
+                    Text(
+                        text = "لا توجد تقارير مرتبطة بهذه الجلسة حتى الآن.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFCBD5E1)
+                    )
+                } else {
+                    activeSessionReports.takeLast(5).asReversed().forEach { report ->
+                        val reportTitle = when (report.reportType) {
+                            "DELAYED" -> "تأخير"
+                            "ARRIVED_STATION" -> "وصول إلى محطة"
+                            "DEPARTED_STATION" -> "مغادرة محطة"
+                            "TRAIN_STOPPED" -> "القطار متوقف"
+                            "TRAIN_MOVING" -> "القطار يتحرك"
+                            "PROBLEM" -> "مشكلة"
+                            else -> "حالة القطار"
+                        }
+                        Text(
+                            text = "• $reportTitle${report.description?.let { ": $it" } ?: ""}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFE2E8F0),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Text(
+                            text = report.createdAt ?: "وقت غير متاح",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF64748B),
+                            modifier = Modifier.padding(start = 12.dp)
+                        )
+                    }
+                }
+                if (isOnboard && monitorBinding != null) {
+                    Button(
+                        onClick = { viewModel.refreshActiveSessionReports() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1E3A5F),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("تحديث التقارير")
                     }
                 }
             }

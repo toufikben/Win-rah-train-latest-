@@ -27,6 +27,10 @@ jobs:
     env:
       VERSION_CODE: ${{ github.run_number }}
       VERSION_NAME: ${{ github.event.inputs.version_name || '1.0' }}
+      # Real production API. Writes remain an explicit release opt-in.
+      WINRAH_API_BASE_URL: https://train-api-uep7.onrender.com/
+      WINRAH_API_ENVIRONMENT: production
+      WINRAH_API_WRITES_ENABLED: "true"
 
     steps:
       - name: Checkout source

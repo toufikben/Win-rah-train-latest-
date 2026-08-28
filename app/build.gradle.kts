@@ -22,8 +22,16 @@ android {
   val configuredApiEnvironment = providers.gradleProperty("WINRAH_API_ENVIRONMENT").orElse(
     System.getenv("WINRAH_API_ENVIRONMENT") ?: "production"
   ).get().trim().lowercase()
-  val configuredApiWritesEnabled = providers.gradleProperty("WINRAH_API_WRITES_ENABLED").orElse(
+  val configuredTestWriteApp = providers.gradleProperty("WINRAH_TEST_WRITE_APP").orElse(
+    System.getenv("WINRAH_TEST_WRITE_APP") ?: "false"
+  ).get().toBooleanStrictOrNull() ?: false
+  val requestedApiWritesEnabled = providers.gradleProperty("WINRAH_API_WRITES_ENABLED").orElse(
     System.getenv("WINRAH_API_WRITES_ENABLED") ?: "false"
+  ).get().toBooleanStrictOrNull() ?: false
+  // Only the explicitly separate .testwrite package may enable writes. Production remains false by default.
+  val configuredApiWritesEnabled = configuredTestWriteApp && requestedApiWritesEnabled
+  val configuredMockLiveData = providers.gradleProperty("WINRAH_USE_MOCK_DATA").orElse(
+    System.getenv("WINRAH_USE_MOCK_DATA") ?: "false"
   ).get().toBooleanStrictOrNull() ?: false
   require(configuredApiBaseUrl.isNotBlank() && !configuredApiBaseUrl.contains("\n")) {
     "WINRAH_API_BASE_URL must be a non-empty single-line URL"
@@ -52,7 +60,13 @@ android {
     buildConfigField("String", "WINRAH_API_BASE_URL", buildConfigString(configuredApiBaseUrl))
     buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
     buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
+    buildConfigField("boolean", "USE_MOCK_LIVE_DATA", configuredMockLiveData.toString())
     manifestPlaceholders["usesCleartextTraffic"] = false
+    manifestPlaceholders["appLabel"] = if (configuredTestWriteApp) {
+      "@string/app_name_test_write"
+    } else {
+      "@string/app_name"
+    }
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -74,13 +88,26 @@ android {
 
   buildTypes {
     release {
+      // Production must never ship diagnostics or mock live-train data.
+      buildConfigField("boolean", "USE_MOCK_LIVE_DATA", "false")
+      buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "false")
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+      buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "true")
+    }
   }
+
+  if (configuredTestWriteApp) {
+    buildTypes.getByName("debug") {
+      applicationIdSuffix = ".testwrite"
+    }
+  }
+
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11

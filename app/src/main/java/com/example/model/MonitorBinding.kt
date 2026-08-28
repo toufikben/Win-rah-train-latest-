@@ -6,9 +6,11 @@ package com.example.model
  */
 data class MonitorBinding(
     val sessionId: String,
-    val tripId: String,
-    val trainId: String
+    val lineId: String = "legacy",
+    val direction: TrainDirection = TrainDirection.OUTBOUND,
+    val tripId: String? = null,
+    val trainId: String? = null,
 ) {
-    fun matches(tripId: String, trainId: String): Boolean =
+    fun matches(tripId: String?, trainId: String?): Boolean =
         this.tripId == tripId && this.trainId == trainId
 }

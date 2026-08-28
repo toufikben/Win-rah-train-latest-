@@ -77,6 +77,7 @@ fun MapScreen(viewModel: TrainViewModel) {
     val selectedStation by viewModel.selectedStation.collectAsState()
     val activeTrains by viewModel.activeTrains.collectAsState()
     val selectedTrain by viewModel.selectedTrain.collectAsState()
+    val monitorBinding by viewModel.monitorBinding.collectAsState()
     val gpsData by viewModel.gpsData.collectAsState()
     val trackGeometry by viewModel.trackGeometry.collectAsState()
     val trackGeometryLoading by viewModel.trackGeometryLoading.collectAsState()
@@ -92,11 +93,19 @@ fun MapScreen(viewModel: TrainViewModel) {
     var mapReady by remember { mutableStateOf(false) }
     var isFollowingTrain by remember { mutableStateOf(false) }
 
-    val primaryTrain = selectedTrain ?: activeTrains.firstOrNull()
-    // When there is no live train, the map remains centered on the selected reference station.
-    val trainLat = primaryTrain?.latitude ?: selectedStation.latitude
-    val trainLon = primaryTrain?.longitude ?: selectedStation.longitude
-    val trainSpeed = primaryTrain?.speedKmh?.toInt()?.toString() ?: "غير متوفر"
+    val boundTrain = monitorBinding?.let { binding ->
+        activeTrains.firstOrNull { it.id == binding.trainId }
+    }
+    // During an active broadcast session, never substitute an unrelated nearby train.
+    val primaryTrain = boundTrain ?: if (monitorBinding == null) (selectedTrain ?: activeTrains.firstOrNull()) else null
+    val ownBroadcastLocation = monitorBinding != null && gpsData.isGpsActive &&
+        gpsData.latitude != 0.0 && gpsData.longitude != 0.0
+    val displayLatitude = primaryTrain?.latitude ?: if (ownBroadcastLocation) gpsData.latitude else null
+    val displayLongitude = primaryTrain?.longitude ?: if (ownBroadcastLocation) gpsData.longitude else null
+    val initialMapLatitude = displayLatitude ?: selectedStation.latitude
+    val initialMapLongitude = displayLongitude ?: selectedStation.longitude
+    val trainSpeed = primaryTrain?.speedKmh?.toInt()?.toString()
+        ?: if (ownBroadcastLocation) gpsData.speedKmh.toInt().toString() else "غير متوفر"
     val trainEta = primaryTrain?.etaToWaitingStationMinutes?.toString() ?: "غير متوفر"
     val trainDistKm = primaryTrain?.distanceToWaitingStationKm?.let { "%.1f".format(it) } ?: "غير متوفر"
     val trainStateKey = when {
@@ -133,11 +142,12 @@ fun MapScreen(viewModel: TrainViewModel) {
     }
 
     // Push only real live coordinates to the Leaflet layer; never create a fallback train.
-    LaunchedEffect(mapReady, trainLat, trainLon, primaryTrain?.trainNumber, trainSpeed, trainEta, trainStateKey, primaryTrain != null) {
-        val script = if (primaryTrain != null) {
+    LaunchedEffect(mapReady, displayLatitude, displayLongitude, primaryTrain?.trainNumber, ownBroadcastLocation, trainSpeed, trainEta, trainStateKey) {
+        val script = if (displayLatitude != null && displayLongitude != null) {
+            val displayTrainNumber = primaryTrain?.trainNumber ?: "قطاري المحدد"
             """
                 if (window.updateTrainPosition) {
-                    window.updateTrainPosition($trainLat, $trainLon, '$trainSpeed', '$trainEta', '${primaryTrain.trainNumber}', '$trainDistKm', '$trainStateKey');
+                    window.updateTrainPosition($displayLatitude, $displayLongitude, '$trainSpeed', '$trainEta', '$displayTrainNumber', '$trainDistKm', '$trainStateKey');
                 }
             """.trimIndent()
         } else {
@@ -168,8 +178,14 @@ fun MapScreen(viewModel: TrainViewModel) {
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = if (primaryTrain != null) "قطار مباشر متاح" else "بانتظار بيانات قطار مباشرة",
-                    color = if (primaryTrain != null) Color(0xFF34D399) else Color(0xFF94A3B8),
+                                            text = when {
+                            boundTrain != null -> "قطارك المحدد ظاهر على الخريطة"
+                            ownBroadcastLocation -> "موقع بثك الحقيقي ظاهر على الخريطة"
+                            primaryTrain != null -> "قطار مباشر متاح"
+                            else -> "بانتظار بيانات قطار مباشرة"
+                        },
+                        color = if (primaryTrain != null || ownBroadcastLocation) Color(0xFF34D399) else Color(0xFF94A3B8),
+
                     style = MaterialTheme.typography.labelSmall
                 )
             }
@@ -579,8 +595,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                                     } else {
                                     var stations = $stationsJson;
                                     var selectedStationCode = '${selectedStation.code}';
-                                    var initialLat = $trainLat;
-                                    var initialLon = $trainLon;
+                                    var initialLat = $initialMapLatitude;
+                                    var initialLon = $initialMapLongitude;
                                     var serverTrackPoints = $serverTrackPointsJson;
 
                                     var map = L.map('map', {

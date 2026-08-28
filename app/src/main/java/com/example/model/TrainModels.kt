@@ -54,10 +54,10 @@ enum class DelayLevel(val titleAr: String, val delayMinutes: Int, val emoji: Str
 }
 
 data class CrowdsourcedReport(
-    val crowding: CrowdingLevel = CrowdingLevel.LOW,
-    val delay: DelayLevel = DelayLevel.ON_TIME,
-    val reportCount: Int = 12,
-    val lastUpdatedMinutesAgo: Int = 2
+    val crowding: CrowdingLevel? = null,
+    val delay: DelayLevel? = null,
+    val reportCount: Int? = null,
+    val lastUpdatedMinutesAgo: Int? = null
 )
 
 data class FavoriteStation(
@@ -100,6 +100,29 @@ data class LineAlert(
     val timeAgo: String,
     val weatherTemperature: String = "24°C",
     val weatherCondition: String = "صافي ومعتدل"
+)
+
+data class BroadcastTripOption(
+    val tripId: String,
+    val trainId: String,
+    val lineId: String,
+    val direction: TrainDirection,
+    val status: String?,
+    val scheduledDeparture: String?,
+    val scheduledArrival: String?,
+)
+
+data class BroadcastSelection(
+    val lineId: String,
+    val direction: TrainDirection,
+    val tripId: String? = null,
+    val trainId: String? = null,
+)
+
+data class WaitingSelection(
+    val lineId: String,
+    val stationId: String,
+    val trainId: String? = null,
 )
 
 data class ActiveTrain(

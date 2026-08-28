@@ -1,0 +1,138 @@
+name: Temporary real-write test APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type I_UNDERSTAND_TEMPORARY_PRODUCTION_WRITES to continue"
+        required: true
+        type: string
+      source_branch:
+        description: "Android branch to build"
+        required: true
+        default: "feature/sensor-share-button-v23"
+        type: string
+      version_name:
+        description: "Test version name"
+        required: true
+        default: "temporary-real-write-test"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: temporary-real-write-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-apk:
+    name: Build temporary real-write APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production-write-test
+
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: ${{ inputs.version_name }}
+      WINRAH_API_BASE_URL: https://train-api-uep7.onrender.com/
+      WINRAH_API_ENVIRONMENT: production
+      WINRAH_API_WRITES_ENABLED: "true"
+
+    steps:
+      - name: Validate explicit confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirmation }}" != "I_UNDERSTAND_TEMPORARY_PRODUCTION_WRITES" ]; then
+            echo "Refusing to build: explicit production-write confirmation was not provided." >&2
+            exit 1
+          fi
+          echo "Confirmed: this APK can send test writes to the production API."
+
+      - name: Checkout selected branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_branch }}
+          fetch-depth: 1
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Create ephemeral debug keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          echo "DEBUG_KEYSTORE_PATH=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
+
+      - name: Run tests and build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace \
+            -PWINRAH_API_BASE_URL="$WINRAH_API_BASE_URL" \
+            -PWINRAH_API_ENVIRONMENT="$WINRAH_API_ENVIRONMENT" \
+            -PWINRAH_API_WRITES_ENABLED=true \
+            -PWINRAH_TEST_WRITE_APP=true \
+            -PKEYSTORE_PATH="$DEBUG_KEYSTORE_PATH" \
+            testDebugUnitTest lintDebug assembleDebug
+
+      - name: Verify APK and record build configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$apk"
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$apksigner_path"
+          "$apksigner_path" verify --verbose "$apk"
+          sha256sum "$apk" | tee app-debug.sha256
+          cat > temporary-real-write-test.txt <<EOF
+          API_BASE_URL=$WINRAH_API_BASE_URL
+          API_ENVIRONMENT=$WINRAH_API_ENVIRONMENT
+          API_WRITES_ENABLED=$WINRAH_API_WRITES_ENABLED
+          SOURCE_BRANCH=${{ inputs.source_branch }}
+          SOURCE_COMMIT=${{ github.sha }}
+          WARNING=This APK may submit test writes to the production API. Disable/delete after testing.
+          EOF
+
+      - name: Upload temporary APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winrah-temporary-real-write-apk-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 3
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app-debug.sha256
+            temporary-real-write-test.txt
+
+      - name: Remove ephemeral signing material
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/debug.keystore"

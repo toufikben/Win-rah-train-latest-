@@ -3,6 +3,8 @@ package com.example.location
 import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
+import android.os.Looper
+import com.example.data.local.PersistentAppLogger
 import com.example.model.LiveGpsData
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -50,15 +52,20 @@ class LocationTracker(context: Context) {
                 Priority.PRIORITY_HIGH_ACCURACY,
                 2_000L
             ).setMinUpdateDistanceMeters(2f).build()
-            client.requestLocationUpdates(request, callback, null)
+            // The caller may run on Dispatchers.IO; null looper is invalid there.
+            // Use the main looper for the callback, while keeping the request lifecycle safe.
+            client.requestLocationUpdates(request, callback, Looper.getMainLooper())
             _isTracking.value = true
+            PersistentAppLogger.write("GPS_REQUEST_ACCEPTED looper=main")
             startWatchdog()
             true
-        } catch (_: SecurityException) {
+        } catch (error: SecurityException) {
             _isTracking.value = false
+            PersistentAppLogger.write("GPS_REQUEST_FAILED_SECURITY", error)
             false
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             _isTracking.value = false
+            PersistentAppLogger.write("GPS_REQUEST_FAILED_EXCEPTION", error)
             false
         }
     }

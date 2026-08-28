@@ -86,11 +86,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.TrainSoundType
+import dz.winrah.trainradar.BuildConfig
 import com.example.data.TrainRepository
 import com.example.viewmodel.TrainViewModel
 
 @Composable
-fun SettingsScreen(viewModel: TrainViewModel) {
+fun SettingsScreen(
+    viewModel: TrainViewModel,
+    onOpenDiagnostics: () -> Unit = {},
+) {
     val context = LocalContext.current
     val isWhistleEnabled by viewModel.isWhistleSoundEnabled.collectAsState()
     val selectedSoundType by viewModel.selectedSoundType.collectAsState()
@@ -161,6 +165,18 @@ fun SettingsScreen(viewModel: TrainViewModel) {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (BuildConfig.DIAGNOSTICS_ENABLED) {
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onOpenDiagnostics,
+            ) {
+                Icon(Icons.Default.Sensors, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("فتح تشخيص بث الموقع")
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // 1. SECTION: SOUND SELECTION & NOTIFICATIONS
         Card(

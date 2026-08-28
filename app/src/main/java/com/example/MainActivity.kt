@@ -26,7 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
 import com.example.ui.components.TrainBottomNav
+import dz.winrah.trainradar.BuildConfig
 import com.example.ui.screens.AnimatedSplashScreen
+import com.example.ui.screens.DiagnosticsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.MapScreen
 import com.example.ui.screens.OnboardScreen
@@ -81,7 +83,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize(),
                             bottomBar = {
                                 TrainBottomNav(
-                                    currentRoute = currentRoute,
+                                    currentRoute = if (currentRoute == "diagnostics") "settings" else currentRoute,
                                     onNavigate = { route -> currentRoute = route }
                                 )
                             }
@@ -95,7 +97,19 @@ class MainActivity : ComponentActivity() {
                                     )
                                     "map" -> MapScreen(viewModel = viewModel)
                                     "onboard" -> OnboardScreen(viewModel = viewModel)
-                                    "settings" -> SettingsScreen(viewModel = viewModel)
+                                    "settings" -> SettingsScreen(
+                                        viewModel = viewModel,
+                                        onOpenDiagnostics = {
+                                            if (BuildConfig.DIAGNOSTICS_ENABLED) currentRoute = "diagnostics"
+                                        },
+                                    )
+                                    "diagnostics" -> if (BuildConfig.DIAGNOSTICS_ENABLED) {
+                                        DiagnosticsScreen(
+                                            onBack = { currentRoute = "settings" },
+                                        )
+                                    } else {
+                                        SettingsScreen(viewModel = viewModel)
+                                    }
                                 }
                             }
                         }

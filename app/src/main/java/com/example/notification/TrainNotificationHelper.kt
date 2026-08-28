@@ -1,5 +1,6 @@
 package com.example.notification
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,6 +9,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
@@ -83,15 +85,39 @@ object TrainNotificationHelper {
         }
     }
 
-    private fun canPostNotifications(context: Context): Boolean {
-        val enabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
-        if (!enabled) Log.w("WinRahNotifications", "Notifications are disabled by the user")
-        return enabled
+    /**
+     * Posts only when notifications are enabled and POST_NOTIFICATIONS is granted on Android 13+.
+     * The permission check is intentionally kept beside notify() so Android Lint and runtime
+     * behavior both see the same guard. A denied/revoked permission is a normal no-op.
+     */
+    private fun postNotification(context: Context, notificationId: Int, notification: android.app.Notification): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w("WinRahNotifications", "POST_NOTIFICATIONS permission is not granted")
+            return false
+        }
+
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            Log.w("WinRahNotifications", "Notifications are disabled by the user")
+            return false
+        }
+
+        return try {
+            NotificationManagerCompat.from(context).notify(notificationId, notification)
+            true
+        } catch (error: SecurityException) {
+            // Permission may be revoked between the check and notify().
+            Log.w("WinRahNotifications", "Notification permission was revoked", error)
+            false
+        }
     }
 
     fun showDestinationAlarmNotification(context: Context, station: Station, remainingKm: Float) {
         try {
-            if (!canPostNotifications(context)) return
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -113,15 +139,12 @@ object TrainNotificationHelper {
                 .setContentIntent(pendingIntent)
                 .setVibrate(longArrayOf(0, 500, 200, 500, 200, 800))
 
-            with(NotificationManagerCompat.from(context)) {
-                notify(NOTIFICATION_ID_ALARM, builder.build())
-            }
+            postNotification(context, NOTIFICATION_ID_ALARM, builder.build())
         } catch (_: Exception) {}
     }
 
     fun showApproachingNotification(context: Context, trainTitle: String, stationName: String, etaMinutes: Int, distKm: Float) {
         try {
-            if (!canPostNotifications(context)) return
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -140,15 +163,12 @@ object TrainNotificationHelper {
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
 
-            with(NotificationManagerCompat.from(context)) {
-                notify(NOTIFICATION_ID_APPROACHING, builder.build())
-            }
+            postNotification(context, NOTIFICATION_ID_APPROACHING, builder.build())
         } catch (_: Exception) {}
     }
 
     fun showTrainArrivalNotification(context: Context, trainTitle: String, stationName: String): Boolean {
         try {
-            if (!canPostNotifications(context)) return false
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -168,28 +188,28 @@ object TrainNotificationHelper {
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .setVibrate(longArrayOf(0, 400, 180, 400))
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_ARRIVAL, builder.build())
-            return true
+            return postNotification(context, NOTIFICATION_ID_ARRIVAL, builder.build())
         } catch (error: Exception) {
             Log.e("WinRahNotifications", "Unable to post arrival notification", error)
             return false
         }
     }
 
+    fun buildOngoingTripNotification(context: Context, currentSpeedKmh: Float, nextStationName: String, isTunnel: Boolean): android.app.Notification {
+        val statusText = if (isTunnel) "إشارة GPS ضعيفة؛ الموقع غير مؤكد" else "السرعة: ${currentSpeedKmh.toInt()} كم/سا"
+        return NotificationCompat.Builder(context, CHANNEL_ONGOING_TRIP)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentTitle("رحلة قطار نشطة • القادمة: $nextStationName")
+            .setContentText(statusText)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+    }
+
     fun showOngoingTripNotification(context: Context, currentSpeedKmh: Float, nextStationName: String, isTunnel: Boolean) {
         try {
-            val statusText = if (isTunnel) "إشارة GPS ضعيفة؛ الموقع غير مؤكد" else "السرعة: ${currentSpeedKmh.toInt()} كم/سا"
-            val builder = NotificationCompat.Builder(context, CHANNEL_ONGOING_TRIP)
-                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-                .setContentTitle("رحلة قطار نشطة • القادمة: $nextStationName")
-                .setContentText(statusText)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-
-            with(NotificationManagerCompat.from(context)) {
-                notify(NOTIFICATION_ID_ONGOING, builder.build())
-            }
+            postNotification(context, NOTIFICATION_ID_ONGOING, buildOngoingTripNotification(context, currentSpeedKmh, nextStationName, isTunnel))
         } catch (_: Exception) {}
     }
 
