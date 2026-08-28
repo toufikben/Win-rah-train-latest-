@@ -15,6 +15,7 @@ import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
 import com.example.data.LiveTrainRepository
 import com.example.data.MockLiveTrainFactory
+import com.example.data.local.LocalMonitorSessionStore
 import com.example.data.local.PersistentAppLogger
 import com.example.data.TrackGeometry
 import com.example.data.TrainRepository
@@ -59,6 +60,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 import java.io.IOException
 import java.util.Locale
@@ -86,6 +88,7 @@ class TrainViewModel private constructor(
 
     private val locationTracker = LocationTrackingCoordinatorProvider.get(app)
     private val localPrefs = app.getSharedPreferences("winrah_local_state", Context.MODE_PRIVATE)
+    private val monitorSessionStore = LocalMonitorSessionStore(app)
 
     val gpsData: StateFlow<LiveGpsData> = locationTracker.gpsData
     val isTrackingLocation: StateFlow<Boolean> = locationTracker.isTracking
@@ -248,6 +251,10 @@ class TrainViewModel private constructor(
 
     init {
         restoreLocalState()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            restoreActiveMonitorSession()
+        }
 
         // Initialize Android notification channels
         TrainNotificationHelper.initNotificationChannels(app)
@@ -976,6 +983,61 @@ class TrainViewModel private constructor(
             }
         }
         localPrefs.edit().putString("favorites", json.toString()).apply()
+    }
+
+    private suspend fun restoreActiveMonitorSession() {
+        val saved = runCatching { monitorSessionStore.load() }.getOrNull() ?: return
+        PersistentAppLogger.write(
+            "SESSION_RESTORE_BEGIN sessionId=${saved.sessionId} lineId=${saved.lineId} direction=${saved.direction}"
+        )
+        val verified = runCatching {
+            liveTrainRepository.resumeMonitorSession(
+                sessionId = saved.sessionId,
+                lineId = saved.lineId,
+                direction = saved.direction,
+                tripId = saved.tripId,
+                trainId = saved.trainId,
+            )
+        }
+        if (verified.isFailure) {
+            val error = verified.exceptionOrNull()
+            PersistentAppLogger.write(
+                "SESSION_RESTORE_FAILED detail=${error?.message ?: error?.javaClass?.simpleName ?: "unknown"}",
+                error,
+            )
+            if (error is HttpException && error.code() in setOf(404, 409)) {
+                monitorSessionStore.clear()
+            }
+            return
+        }
+        val session = verified.getOrThrow()
+        val valid = session.id == saved.sessionId &&
+            session.lineId == saved.lineId &&
+            session.direction == saved.direction.name &&
+            session.tripId == saved.tripId &&
+            session.trainId == saved.trainId &&
+            session.status in setOf("STARTING", "ACTIVE")
+        if (!valid) {
+            PersistentAppLogger.write("SESSION_RESTORE_REJECTED reason=binding_mismatch status=${session.status}")
+            monitorSessionStore.clear()
+            return
+        }
+        withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            _monitorBinding.value = saved
+            _isOnboardMode.value = true
+            _isOnboardActivationPending.value = false
+            _activeSessionReports.value = emptyList()
+            refreshActiveSessionReports()
+            startTrainTrackingService(
+                saved.sessionId,
+                saved.lineId,
+                saved.direction,
+                saved.tripId,
+                saved.trainId,
+            )
+            _userFeedbackMessage.value = "تم استرجاع جلسة بث الموقع النشطة."
+        }
+        PersistentAppLogger.write("SESSION_RESTORE_SUCCESS sessionId=${saved.sessionId} status=${session.status}")
     }
 
     private fun restoreLocalState() {
