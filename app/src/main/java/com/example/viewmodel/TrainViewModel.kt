@@ -61,6 +61,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -1052,9 +1053,13 @@ class TrainViewModel private constructor(
             nowMs = System.currentTimeMillis(),
             previous = corridorExitState,
         )
-        corridorExitState = decision.state
-
+                corridorExitState = decision.state
+        PersistentAppLogger.write(
+            "CORRIDOR_EXIT_SAMPLE distanceMeters=${"%.1f".format(Locale.US, corridorDistMeters)} " +
+                "outsideSamples=${decision.state.outsideSampleCount} shouldStop=${decision.shouldStopBroadcast}"
+        )
         when {
+
             gps.isDeadReckoning -> {
                 _verificationStatus.value = VerificationStatus.TUNNEL_DEAD_RECKONING
             }
@@ -1066,6 +1071,7 @@ class TrainViewModel private constructor(
                 }
             }
             decision.shouldStopBroadcast -> {
+                PersistentAppLogger.write("AUTO_STOP_BROADCAST reason=outside_corridor durationSeconds=30")
                 toggleOnboardMode(false)
                 _verificationStatus.value = VerificationStatus.WAITING_GPS
                 _userFeedbackMessage.value = "تم إيقاف بث الموقع تلقائيًا: ابتعد جهازك عن ممر السكة الحديدية."
