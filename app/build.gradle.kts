@@ -30,6 +30,9 @@ android {
   ).get().toBooleanStrictOrNull() ?: false
   // Only the explicitly separate .testwrite package may enable writes. Production remains false by default.
   val configuredApiWritesEnabled = configuredTestWriteApp && requestedApiWritesEnabled
+  val configuredMockLiveData = providers.gradleProperty("WINRAH_USE_MOCK_DATA").orElse(
+    System.getenv("WINRAH_USE_MOCK_DATA") ?: "false"
+  ).get().toBooleanStrictOrNull() ?: false
   require(configuredApiBaseUrl.isNotBlank() && !configuredApiBaseUrl.contains("\n")) {
     "WINRAH_API_BASE_URL must be a non-empty single-line URL"
   }
@@ -57,6 +60,7 @@ android {
     buildConfigField("String", "WINRAH_API_BASE_URL", buildConfigString(configuredApiBaseUrl))
     buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
     buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
+    buildConfigField("boolean", "USE_MOCK_LIVE_DATA", configuredMockLiveData.toString())
     manifestPlaceholders["usesCleartextTraffic"] = false
     manifestPlaceholders["appLabel"] = if (configuredTestWriteApp) {
       "@string/app_name_test_write"

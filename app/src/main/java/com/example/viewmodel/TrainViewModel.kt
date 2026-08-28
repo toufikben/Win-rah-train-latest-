@@ -1,6 +1,7 @@
 package com.example.viewmodel
 
 import android.app.Application
+import dz.winrah.trainradar.BuildConfig
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -13,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.TrainSoundSynthesizer
 import com.example.audio.TrainSoundType
 import com.example.data.LiveTrainRepository
+import com.example.data.MockLiveTrainFactory
 import com.example.data.local.PersistentAppLogger
 import com.example.data.TrackGeometry
 import com.example.data.TrainRepository
@@ -256,7 +258,8 @@ class TrainViewModel private constructor(
                     updateNearbyStations(gps.latitude, gps.longitude)
                     if (_isOnboardMode.value) {
                         verifyPassengerLocation(gps)
-                        sendObservationIfEligible(gps)
+                        // TrainTrackingService is the sole observation sender during broadcast.
+                        // The ViewModel only observes GPS for UI verification and alerts.
                         if (_isBackgroundNotificationEnabled.value) {
                             val nextStName = _activeTrains.value.firstOrNull()?.nextStation?.name ?: "المحطة القادمة"
                             TrainNotificationHelper.showOngoingTripNotification(
@@ -493,6 +496,10 @@ class TrainViewModel private constructor(
                     trainId = session.trainId,
                 )
                 _activeSessionReports.value = emptyList()
+                // Hand the shared GPS coordinator to the foreground service.
+                // This prevents the ViewModel and service from owning callbacks together.
+                PersistentAppLogger.write("GPS_OWNERSHIP_HANDOFF_TO_SERVICE")
+                locationTracker.stop()
                 refreshActiveSessionReports()
                 startTrainTrackingService(
                     session.id,
@@ -1145,10 +1152,18 @@ class TrainViewModel private constructor(
         )
 
         try {
-            val trains = liveTrainRepository.getLiveTrainsForLine(
-                requestedLine,
-                requestedStation
-            ).filter { train ->
+            val trains = if (BuildConfig.USE_MOCK_LIVE_DATA) {
+                PersistentAppLogger.write(
+                    "RECEPTION_REFRESH_MOCK lineId=${requestedLine.id} " +
+                        "station=${requestedStation.code}"
+                )
+                MockLiveTrainFactory.create(requestedLine, requestedStation)
+            } else {
+                liveTrainRepository.getLiveTrainsForLine(
+                    requestedLine,
+                    requestedStation
+                )
+            }.filter { train ->
                 requestedDirection == TrainDirection.BOTH ||
                     train.direction == null ||
                     train.direction == requestedDirection
