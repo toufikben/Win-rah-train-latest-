@@ -50,6 +50,8 @@ import com.example.utils.GeoUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -230,6 +232,8 @@ class TrainViewModel private constructor(
     private val announcedArrivalKeys = mutableSetOf<String>()
 
     private var liveRefreshJob: Job? = null
+    private var radarRefreshJob: Job? = null
+    private val radarRefreshMutex = Mutex()
     private val _monitorBinding = MutableStateFlow<MonitorBinding?>(null)
     val monitorBinding: StateFlow<MonitorBinding?> = _monitorBinding.asStateFlow()
     private val _activeSessionReports = MutableStateFlow<List<ReportDto>>(emptyList())
@@ -1115,55 +1119,92 @@ class TrainViewModel private constructor(
         liveRefreshJob?.cancel()
         liveRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
-                refreshLiveTrains()
+                refreshLiveTrainsInternal()
                 delay(15_000L)
             }
         }
     }
 
     fun refreshLiveTrains() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _isLiveDataLoading.value = true
-            _liveDataError.value = null
-            PersistentAppLogger.write(
-                "RECEPTION_REFRESH_BEGIN lineId=${_selectedSuburb.value.id} " +
-                    "station=${_selectedStation.value.code} direction=${_selectedDirectionFilter.value}"
-            )
-            try {
-                val trains = liveTrainRepository.getLiveTrainsForLine(
-                    _selectedSuburb.value,
-                    _selectedStation.value
-                ).filter { train ->
-                    _selectedDirectionFilter.value == TrainDirection.BOTH ||
-                        train.direction == null ||
-                        train.direction == _selectedDirectionFilter.value
-                }
-                _activeTrains.value = trains
+        radarRefreshJob?.cancel()
+        radarRefreshJob = viewModelScope.launch(Dispatchers.IO) {
+            refreshLiveTrainsInternal()
+        }
+    }
+
+    private suspend fun refreshLiveTrainsInternal() = radarRefreshMutex.withLock {
+        // Snapshot the selection so a slow response cannot be applied to a newer selection.
+        val requestedLine = _selectedSuburb.value
+        val requestedStation = _selectedStation.value
+        val requestedDirection = _selectedDirectionFilter.value
+        _isLiveDataLoading.value = true
+        _liveDataError.value = null
+        PersistentAppLogger.write(
+            "RECEPTION_REFRESH_BEGIN lineId=${requestedLine.id} " +
+                "station=${requestedStation.code} direction=$requestedDirection"
+        )
+
+        try {
+            val trains = liveTrainRepository.getLiveTrainsForLine(
+                requestedLine,
+                requestedStation
+            ).filter { train ->
+                requestedDirection == TrainDirection.BOTH ||
+                    train.direction == null ||
+                    train.direction == requestedDirection
+            }
+
+            if (!isCurrentRadarSelection(requestedLine.id, requestedStation.code, requestedDirection)) {
                 PersistentAppLogger.write(
-                    "RECEPTION_REFRESH_SUCCESS count=${trains.size} " +
-                        "trains=${trains.take(10).joinToString(separator = ";") { train ->
-                            "id=${train.id},speed=${train.speedKmh},eta=${train.etaToWaitingStationMinutes}," +
-                                "status=${train.status},next=${train.nextStation?.code}"
-                        }}"
+                    "RECEPTION_REFRESH_IGNORED_STALE " +
+                        "lineId=${requestedLine.id} station=${requestedStation.code}"
                 )
-                if (trains.isEmpty()) {
-                    val trackableTrip = liveTrainRepository.getTrackableTripForLine(_selectedSuburb.value)
+                return@withLock
+            }
+
+            _activeTrains.value = trains
+            PersistentAppLogger.write(
+                "RECEPTION_REFRESH_SUCCESS count=${trains.size} " +
+                    "trains=${trains.take(10).joinToString(separator = ";") { train ->
+                        "id=${train.id},speed=${train.speedKmh},eta=${train.etaToWaitingStationMinutes}," +
+                            "status=${train.status},next=${train.nextStation?.code}"
+                    }}"
+            )
+            if (trains.isEmpty()) {
+                val trackableTrip = liveTrainRepository.getTrackableTripForLine(requestedLine)
+                if (isCurrentRadarSelection(requestedLine.id, requestedStation.code, requestedDirection)) {
                     _liveDataError.value = if (trackableTrip == null) {
                         "لا توجد رحلات متاحة حاليًا لهذا المسار. غيّر الضاحية أو الاتجاه وحاول لاحقًا."
                     } else {
                         "الرحلة موجودة، لكن لا توجد بيانات موقع حي حاليًا. لا يمكن عرض قطار حتى تصل ملاحظة GPS حقيقية."
                     }
                 }
-                checkApproachingTrain()
-            } catch (error: Exception) {
-                PersistentAppLogger.write("RECEPTION_REFRESH_FAILED detail=${error.message ?: error.javaClass.simpleName}", error)
+            }
+            checkApproachingTrain()
+        } catch (error: Exception) {
+            PersistentAppLogger.write(
+                "RECEPTION_REFRESH_FAILED detail=${error.message ?: error.javaClass.simpleName}",
+                error,
+            )
+            if (isCurrentRadarSelection(requestedLine.id, requestedStation.code, requestedDirection)) {
                 _activeTrains.value = emptyList()
                 _liveDataError.value = "تعذر جلب البث الحي من الخادم. تحقق من الاتصال وحاول مجدداً."
-            } finally {
+            }
+        } finally {
+            if (isCurrentRadarSelection(requestedLine.id, requestedStation.code, requestedDirection)) {
                 _isLiveDataLoading.value = false
             }
         }
     }
+
+    private fun isCurrentRadarSelection(
+        lineId: String,
+        stationCode: String,
+        direction: TrainDirection,
+    ): Boolean =
+        _selectedSuburb.value.id == lineId &&
+            _selectedStation.value.code == stationCode &&
+            _selectedDirectionFilter.value == direction
 
     private fun recalculateActiveTrains() {
         refreshLiveTrains()
@@ -1237,5 +1278,6 @@ class TrainViewModel private constructor(
         stopTrainTrackingService()
         TrainNotificationHelper.clearOngoingNotification(app)
         liveRefreshJob?.cancel()
+        radarRefreshJob?.cancel()
     }
 }
