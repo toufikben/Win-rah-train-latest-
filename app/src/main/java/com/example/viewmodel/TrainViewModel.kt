@@ -423,6 +423,7 @@ class TrainViewModel private constructor(
             val binding = _monitorBinding.value
             _monitorBinding.value = null
             _activeSessionReports.value = emptyList()
+            clearPersistedReportSelections()
             corridorExitState = CorridorExitState()
             _isOnboardActivationPending.value = false
             locationTracker.stop()
@@ -503,6 +504,7 @@ class TrainViewModel private constructor(
                     tripId = session.tripId,
                     trainId = session.trainId,
                 )
+                restorePersistedReportSelections(session.id)
                 _activeSessionReports.value = emptyList()
                 // Hand the shared GPS coordinator to the foreground service.
                 // This prevents the ViewModel and service from owning callbacks together.
@@ -525,6 +527,7 @@ class TrainViewModel private constructor(
                 }
                 _monitorBinding.value = null
                 _activeSessionReports.value = emptyList()
+                clearPersistedReportSelections()
                 _isOnboardMode.value = false
                 _isOnboardActivationPending.value = false
                 locationTracker.stop()
@@ -813,6 +816,9 @@ class TrainViewModel private constructor(
                     )
                 )
                 refreshActiveSessionReports()
+                if (sessionId != null) {
+                    persistReportSelection(sessionId, reportType)
+                }
                 PersistentAppLogger.write(
                     "REPORT_SUBMIT_SUCCESS sessionId=${sessionId ?: "none"} trainId=${trainId ?: "none"} type=$reportType"
                 )
@@ -1015,10 +1021,12 @@ class TrainViewModel private constructor(
         if (!valid) {
             PersistentAppLogger.write("SESSION_RESTORE_REJECTED reason=binding_mismatch status=${session.status}")
             monitorSessionStore.clear()
+            clearPersistedReportSelections()
             return
         }
         withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
             _monitorBinding.value = saved
+            restorePersistedReportSelections(saved.sessionId)
             _isOnboardMode.value = true
             _isOnboardActivationPending.value = false
             _activeSessionReports.value = emptyList()
@@ -1064,6 +1072,38 @@ class TrainViewModel private constructor(
             }
         }
         _favoriteStations.value = restored
+    }
+
+    private fun persistReportSelection(sessionId: String, reportType: String) {
+        localPrefs.edit()
+            .putString("report_state_session_id", sessionId)
+            .putString("report_crowding", _selectedCrowdingReport.value?.name)
+            .putString("report_delay", _selectedDelayReport.value?.name)
+            .apply()
+    }
+
+    private fun restorePersistedReportSelections(sessionId: String) {
+        if (localPrefs.getString("report_state_session_id", null) != sessionId) {
+            _selectedCrowdingReport.value = null
+            _selectedDelayReport.value = null
+            return
+        }
+        _selectedCrowdingReport.value = runCatching {
+            localPrefs.getString("report_crowding", null)?.let(CrowdingLevel::valueOf)
+        }.getOrNull()
+        _selectedDelayReport.value = runCatching {
+            localPrefs.getString("report_delay", null)?.let(DelayLevel::valueOf)
+        }.getOrNull()
+    }
+
+    private fun clearPersistedReportSelections() {
+        _selectedCrowdingReport.value = null
+        _selectedDelayReport.value = null
+        localPrefs.edit()
+            .remove("report_state_session_id")
+            .remove("report_crowding")
+            .remove("report_delay")
+            .apply()
     }
 
     fun triggerSelectedSound(soundType: TrainSoundType = _selectedSoundType.value) {
