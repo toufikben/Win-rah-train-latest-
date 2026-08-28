@@ -160,15 +160,16 @@ class TrainTrackingService : Service() {
             }
             sessionStore.save(MonitorBinding(sessionId, lineId, direction, tripId, trainId))
 
-            val wasAlreadyTracking = locationCoordinator.isTracking.value
+            log("LOCATION_OWNERSHIP_TAKEOVER_BEGIN")
             log("LOCATION_START_BEGIN")
-            if (!locationCoordinator.start()) {
+            if (!locationCoordinator.restartAsServiceOwner()) {
                 log("LOCATION_START_RETURNED_FALSE")
                 stopSelf()
                 return@launch
             }
-            serviceOwnsLocation = !wasAlreadyTracking
-            log("LOCATION_START_SUCCESS serviceOwnsLocation=$serviceOwnsLocation")
+            serviceOwnsLocation = true
+            log("LOCATION_OWNERSHIP_TAKEOVER_SUCCESS")
+            log("LOCATION_START_SUCCESS serviceOwnsLocation=true")
             observationJob?.cancel()
             observationJob = launch {
                 locationCoordinator.gpsData

@@ -43,6 +43,16 @@ class LocationTrackingCoordinator(context: Context) {
         } ?: FirstFixResult.TIMEOUT
     }
 
+    /**
+     * Cancels any existing fused-location subscription and starts a fresh one.
+     * Used by the foreground service when it takes ownership after restoration.
+     */
+    @Synchronized
+    fun restartAsServiceOwner(): Boolean {
+        tracker.stopLocationUpdates()
+        return tracker.startLocationUpdates()
+    }
+
     @Synchronized
     fun stop() {
         tracker.stopLocationUpdates()
