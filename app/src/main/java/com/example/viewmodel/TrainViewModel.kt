@@ -765,17 +765,25 @@ class TrainViewModel private constructor(
     private fun submitBoundEvidenceReport(reportType: String, description: String) {
         val binding = _monitorBinding.value
         if (binding == null) {
-            _userFeedbackMessage.value = "ابدأ بثًا حيًا موثقًا قبل إرسال إفادة من وضع الراكب."
+            _userFeedbackMessage.value = "ابدأ بثًا حيًا قبل إرسال إفادة عن حالة القطار."
+            PersistentAppLogger.write("REPORT_SUBMIT_BLOCKED reason=no_active_session type=$reportType")
             return
         }
-        val trainId = binding.trainId
+        // Public corridor sessions have no selected train. Bind the report to the
+        // currently displayed live train instead of blocking the user.
+        val activeTrain = _activeTrains.value.firstOrNull()
+        val trainId = binding.trainId ?: activeTrain?.id
         if (trainId == null) {
-            _userFeedbackMessage.value = "اختر قطارًا محددًا قبل إرسال إفادة عن حالة قطار."
+            _userFeedbackMessage.value = "انتظر ظهور قطار حي قبل إرسال الإفادة."
+            PersistentAppLogger.write("REPORT_SUBMIT_BLOCKED reason=no_train_available type=$reportType")
             return
         }
+        PersistentAppLogger.write(
+            "REPORT_SUBMIT_BEGIN sessionId=${binding.sessionId} trainId=$trainId type=$reportType"
+        )
         submitEvidenceReport(
             trainId = trainId,
-            tripId = binding.tripId,
+            tripId = binding.tripId ?: activeTrain?.tripId,
             reportType = reportType,
             description = description,
             sessionId = binding.sessionId,
@@ -802,8 +810,16 @@ class TrainViewModel private constructor(
                     )
                 )
                 refreshActiveSessionReports()
-                _userFeedbackMessage.value = "تم إرسال الإفادة إلى الخادم كبيان من مستخدمين، شكرًا لمساهمتك."
-            } catch (_: Exception) {
+                PersistentAppLogger.write(
+                    "REPORT_SUBMIT_SUCCESS sessionId=${sessionId ?: "none"} trainId=$trainId type=$reportType"
+                )
+                _userFeedbackMessage.value = "تم إرسال الإفادة إلى الخادم، شكرًا لمساهمتك."
+            } catch (error: Exception) {
+                PersistentAppLogger.write(
+                    "REPORT_SUBMIT_FAILED sessionId=${sessionId ?: "none"} trainId=$trainId " +
+                        "type=$reportType detail=${error.message ?: error.javaClass.simpleName}",
+                    error,
+                )
                 _userFeedbackMessage.value = "تعذر إرسال الإفادة الآن. تحقق من الاتصال وحاول مجددًا."
             }
         }
