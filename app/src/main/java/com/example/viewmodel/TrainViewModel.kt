@@ -288,7 +288,7 @@ class TrainViewModel private constructor(
         }
 
         if (enableLivePolling) {
-            refreshLiveTrains()
+            // The polling loop performs the initial refresh itself; do not launch a second request.
             startLiveRefresh()
         }
     }
