@@ -107,6 +107,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
     val broadcastTrips by viewModel.broadcastTrips.collectAsState()
     val broadcastSelection by viewModel.broadcastSelection.collectAsState()
     val monitorBinding by viewModel.monitorBinding.collectAsState()
+    val reportsEnabled = monitorBinding != null
     val activeSessionReports by viewModel.activeSessionReports.collectAsState()
     val feedbackMsg by viewModel.userFeedbackMessage.collectAsState()
     val selectedInterchange by viewModel.selectedInterchange.collectAsState()
@@ -796,6 +797,18 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
+                    text = if (reportsEnabled) {
+                        "يمكنك الآن مشاركة حالة القطار"
+                    } else {
+                        "ابدأ بث موقعك أولًا لتفعيل تقارير الاكتظاظ والتأخير"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (reportsEnabled) Color(0xFF86EFAC) else Color(0xFFFBBF24)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
                     text = "مدى الاكتظاظ في عربتك:",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
@@ -811,11 +824,12 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                         val isSelected = selectedCrowdingReport == level
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(level.colorHex).copy(alpha = 0.28f) else Color(0xFF1E293B),
-                            border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, Color(level.colorHex)),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable(enabled = !isSelected) {
+                                                            color = if (isSelected) Color(level.colorHex).copy(alpha = 0.28f) else Color(0xFF1E293B).copy(alpha = if (reportsEnabled) 1f else 0.55f),
+                                border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, Color(level.colorHex).copy(alpha = if (reportsEnabled) 1f else 0.45f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable(enabled = reportsEnabled && !isSelected) {
+
                                     viewModel.submitCrowdingReport(level)
                                 }
                         ) {
@@ -854,11 +868,12 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                         val isSelected = selectedDelayReport == delayLevel
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.30f) else Color(0xFF1E293B),
-                            border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF60A5FA) else Color(0xFF475569)),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable(enabled = !isSelected) {
+                                                            color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.30f) else Color(0xFF1E293B).copy(alpha = if (reportsEnabled) 1f else 0.55f),
+                                border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF60A5FA) else Color(0xFF475569).copy(alpha = if (reportsEnabled) 1f else 0.45f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable(enabled = reportsEnabled && !isSelected) {
+
                                     viewModel.submitDelayReport(delayLevel)
                                 }
                         ) {
