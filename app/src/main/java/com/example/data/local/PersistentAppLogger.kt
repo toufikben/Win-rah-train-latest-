@@ -2,6 +2,7 @@ package com.example.data.local
 
 import android.content.Context
 import android.util.Log
+import dz.winrah.trainradar.BuildConfig
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -17,12 +18,14 @@ object PersistentAppLogger {
     private var appContext: Context? = null
 
     fun initialize(context: Context) {
+        if (!BuildConfig.DIAGNOSTICS_ENABLED) return
         appContext = context.applicationContext
         write("LOGGER_INITIALIZED")
     }
 
     @Synchronized
     fun write(event: String, error: Throwable? = null) {
+        if (!BuildConfig.DIAGNOSTICS_ENABLED) return
         val message = buildString {
             append(timestamp())
             append(" | ")
@@ -53,13 +56,17 @@ object PersistentAppLogger {
         }
     }
 
-    fun read(context: Context): String = runCatching {
+    fun read(context: Context): String {
+        if (!BuildConfig.DIAGNOSTICS_ENABLED) return "التشخيص غير متاح في نسخة الإصدار."
+        return runCatching {
         val file = File(context.applicationContext.filesDir, LOG_FILE)
         if (file.exists()) file.readText(Charsets.UTF_8)
         else "لا توجد سجلات محفوظة."
-    }.getOrElse { "تعذر قراءة السجل: ${it.message}" }
+        }.getOrElse { "تعذر قراءة السجل: ${it.message}" }
+    }
 
     fun clear(context: Context) {
+        if (!BuildConfig.DIAGNOSTICS_ENABLED) return
         val directory = context.applicationContext.filesDir
         File(directory, LOG_FILE).delete()
         File(directory, BACKUP_FILE).delete()

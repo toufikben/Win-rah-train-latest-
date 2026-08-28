@@ -88,12 +88,18 @@ android {
 
   buildTypes {
     release {
+      // Production must never ship diagnostics or mock live-train data.
+      buildConfigField("boolean", "USE_MOCK_LIVE_DATA", "false")
+      buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "false")
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+      buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "true")
+    }
   }
 
   if (configuredTestWriteApp) {

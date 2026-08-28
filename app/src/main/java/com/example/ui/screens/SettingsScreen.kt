@@ -86,6 +86,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.TrainSoundType
+import dz.winrah.trainradar.BuildConfig
 import com.example.data.TrainRepository
 import com.example.viewmodel.TrainViewModel
 
@@ -165,16 +166,17 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedButton(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onOpenDiagnostics,
-        ) {
-            Icon(Icons.Default.Sensors, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("فتح تشخيص بث الموقع")
+        if (BuildConfig.DIAGNOSTICS_ENABLED) {
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onOpenDiagnostics,
+            ) {
+                Icon(Icons.Default.Sensors, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("فتح تشخيص بث الموقع")
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
 
         // 1. SECTION: SOUND SELECTION & NOTIFICATIONS
         Card(

@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
 import com.example.ui.components.TrainBottomNav
+import dz.winrah.trainradar.BuildConfig
 import com.example.ui.screens.AnimatedSplashScreen
 import com.example.ui.screens.DiagnosticsScreen
 import com.example.ui.screens.HomeScreen
@@ -98,11 +99,17 @@ class MainActivity : ComponentActivity() {
                                     "onboard" -> OnboardScreen(viewModel = viewModel)
                                     "settings" -> SettingsScreen(
                                         viewModel = viewModel,
-                                        onOpenDiagnostics = { currentRoute = "diagnostics" },
+                                        onOpenDiagnostics = {
+                                            if (BuildConfig.DIAGNOSTICS_ENABLED) currentRoute = "diagnostics"
+                                        },
                                     )
-                                    "diagnostics" -> DiagnosticsScreen(
-                                        onBack = { currentRoute = "settings" },
-                                    )
+                                    "diagnostics" -> if (BuildConfig.DIAGNOSTICS_ENABLED) {
+                                        DiagnosticsScreen(
+                                            onBack = { currentRoute = "settings" },
+                                        )
+                                    } else {
+                                        SettingsScreen(viewModel = viewModel)
+                                    }
                                 }
                             }
                         }
