@@ -777,17 +777,12 @@ class TrainViewModel private constructor(
             PersistentAppLogger.write("REPORT_SUBMIT_BLOCKED reason=no_active_session type=$reportType")
             return
         }
-        // Public corridor sessions have no selected train. Bind the report to the
-        // currently displayed live train instead of blocking the user.
+        // Public corridor sessions may intentionally have no train identity.
+        // The report remains bound to the active session, line, direction and station.
         val activeTrain = _activeTrains.value.firstOrNull()
         val trainId = binding.trainId ?: activeTrain?.id
-        if (trainId == null) {
-            _userFeedbackMessage.value = "انتظر ظهور قطار حي قبل إرسال الإفادة."
-            PersistentAppLogger.write("REPORT_SUBMIT_BLOCKED reason=no_train_available type=$reportType")
-            return
-        }
         PersistentAppLogger.write(
-            "REPORT_SUBMIT_BEGIN sessionId=${binding.sessionId} trainId=$trainId type=$reportType"
+            "REPORT_SUBMIT_BEGIN sessionId=${binding.sessionId} trainId=${trainId ?: "none"} type=$reportType"
         )
         submitEvidenceReport(
             trainId = trainId,
@@ -799,7 +794,7 @@ class TrainViewModel private constructor(
     }
 
     private fun submitEvidenceReport(
-        trainId: String,
+        trainId: String?,
         tripId: String?,
         reportType: String,
         description: String,
@@ -819,12 +814,12 @@ class TrainViewModel private constructor(
                 )
                 refreshActiveSessionReports()
                 PersistentAppLogger.write(
-                    "REPORT_SUBMIT_SUCCESS sessionId=${sessionId ?: "none"} trainId=$trainId type=$reportType"
+                    "REPORT_SUBMIT_SUCCESS sessionId=${sessionId ?: "none"} trainId=${trainId ?: "none"} type=$reportType"
                 )
                 _userFeedbackMessage.value = "تم إرسال الإفادة إلى الخادم، شكرًا لمساهمتك."
             } catch (error: Exception) {
                 PersistentAppLogger.write(
-                    "REPORT_SUBMIT_FAILED sessionId=${sessionId ?: "none"} trainId=$trainId " +
+                    "REPORT_SUBMIT_FAILED sessionId=${sessionId ?: "none"} trainId=${trainId ?: "none"} " +
                         "type=$reportType detail=${error.message ?: error.javaClass.simpleName}",
                     error,
                 )
