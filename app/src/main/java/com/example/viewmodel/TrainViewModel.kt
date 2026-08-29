@@ -497,6 +497,21 @@ class TrainViewModel private constructor(
                         )
                     }
                 }
+                val firstGps = locationTracker.gpsData.value
+                val firstCorridorDistance = GeoUtils.findClosestRailwaySegmentDistanceMeters(
+                    firstGps.latitude,
+                    firstGps.longitude,
+                    _broadcastLine.value.stations,
+                )
+                PersistentAppLogger.write(
+                    "BROADCAST_CORRIDOR_CHECK distanceMeters=${"%.1f".format(Locale.US, firstCorridorDistance)} " +
+                        "deadReckoning=${firstGps.isDeadReckoning}"
+                )
+                if (!firstGps.isDeadReckoning &&
+                    firstCorridorDistance > CorridorExitPolicy.CORRIDOR_EXIT_DISTANCE_METERS
+                ) {
+                    throw IllegalStateException("outside_corridor")
+                }
                 _monitorBinding.value = MonitorBinding(
                     sessionId = session.id,
                     lineId = session.lineId,
@@ -541,6 +556,8 @@ class TrainViewModel private constructor(
                     "تعذر تشغيل مستشعر GPS. فعّل الموقع على مستوى الجهاز وأوقف تقييد البطارية للتطبيق ثم حاول مجددًا."
                 } else if (error.message == "location_unavailable" || error.message == "location_unavailable_timeout") {
                     "تم إنشاء جلسة البث، لكن لم تصل إشارة GPS حقيقية خلال 45 ثانية. تحرك إلى مكان مفتوح وتأكد من تشغيل الموقع ثم حاول مجددًا."
+                } else if (error.message == "outside_corridor") {
+                    "لا يمكن بدء البث: موقعك يبعد أكثر من 400 متر عن ممر السكة الحديدية. اقترب من السكة ثم حاول مجددًا."
                 } else if (error.message == "no_live_trackable_train") {
                     "لا يوجد قطار حي موثق يمكن بدء المراقبة عليه الآن."
                 } else if (error.message == "broadcast_selection_required") {
