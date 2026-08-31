@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.CrowdingLevel
@@ -316,8 +318,9 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                 .fillMaxWidth()
                 .clickable { viewModel.openInterchangeModal(selectedStation.code) }
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+                                Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
+
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -402,7 +405,10 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = if (isOnboard) "بث GPS الحي والخدمة في الخلفية نشطان 🛰️" else "بث موقع الراكب متوقف",
+                                            text = if (isOnboard) "بث GPS الحي والخدمة في الخلفية نشطان 🛰️" else "بث موقع الراكب متوقف",
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -425,6 +431,9 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                                             Text(
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                             text = when {
                                 isOnboardActivationPending -> "جارٍ تفعيل بث المستشعر..."
                                 isOnboard -> "بث الموقع الحي مفعّل"
@@ -458,7 +467,9 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             }
                         },
                         enabled = !isOnboardActivationPending,
-                        modifier = Modifier.width(154.dp),
+                        modifier = Modifier
+                            .width(154.dp)
+                            .defaultMinSize(minHeight = 48.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = when {
@@ -511,10 +522,12 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                     Text(text = "GPS", fontSize = 18.sp, color = Color(0xFF38BDF8))
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
+                        modifier = Modifier.weight(1f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
                         text = if (gpsData.isGpsActive) "الموقع الحقيقي متاح؛ لا يوجد تقدير اصطناعي عند فقدان الإشارة." else "في انتظار الموقع الحقيقي من الجهاز.",
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFFCBD5E1),
-                        modifier = Modifier.weight(1f)
+                        color = Color(0xFFCBD5E1)
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
@@ -828,6 +841,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                                 border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, Color(level.colorHex).copy(alpha = if (reportsEnabled) 1f else 0.45f)),
                                 modifier = Modifier
                                     .weight(1f)
+                                    .defaultMinSize(minHeight = 64.dp)
                                     .clickable(enabled = reportsEnabled && !isSelected) {
 
                                     viewModel.submitCrowdingReport(level)
@@ -872,6 +886,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                                 border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF60A5FA) else Color(0xFF475569).copy(alpha = if (reportsEnabled) 1f else 0.45f)),
                                 modifier = Modifier
                                     .weight(1f)
+                                    .defaultMinSize(minHeight = 64.dp)
                                     .clickable(enabled = reportsEnabled && !isSelected) {
 
                                     viewModel.submitDelayReport(delayLevel)

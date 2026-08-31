@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -76,6 +77,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.TrainRepository
@@ -154,7 +156,9 @@ fun HomeScreen(
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = if (isOnboard) Color(0xFF059669) else Color(0xFF1E293B),
-                modifier = Modifier.clickable { onNavigateToOnboard() }
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clickable { onNavigateToOnboard() }
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -593,7 +597,9 @@ fun HomeScreen(
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = if (isSelected) Color(0xFF059669) else Color(0xFF1E293B),
-                    modifier = Modifier.clickable { viewModel.selectStation(station) }
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clickable { viewModel.selectStation(station) }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -638,6 +644,7 @@ fun HomeScreen(
                     color = if (isSelected) Color(0xFF0284C7) else Color(0xFF1E293B),
                     modifier = Modifier
                         .weight(1f)
+                        .defaultMinSize(minHeight = 48.dp)
                         .clickable { viewModel.setDirectionFilter(dir) }
                 ) {
                     Row(
@@ -670,14 +677,20 @@ fun HomeScreen(
                 text = "القطارات القادمة لمحطة (${selectedStation.name})",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = "فتح الخريطة 🗺️",
                 style = MaterialTheme.typography.labelMedium,
                 color = Color(0xFF38BDF8),
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { onNavigateToMap() }
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .padding(horizontal = 4.dp)
+                    .clickable { onNavigateToMap() }
             )
         }
 
@@ -1495,11 +1508,14 @@ fun EnhancedTrainCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(text = train.crowdReport?.crowding?.emoji ?: "•", fontSize = 14.sp)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
@@ -1522,7 +1538,9 @@ fun EnhancedTrainCard(
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = Color(0xFF334155),
-                        modifier = Modifier.clickable { onReportClicked() }
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 40.dp)
+                            .clickable { onReportClicked() }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
@@ -1560,11 +1578,16 @@ fun EnhancedTrainCard(
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
                     // Distance
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
                             text = "المسافة المتبقية",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF94A3B8)
+                            color = Color(0xFF94A3B8),
+                            textAlign = TextAlign.Center,
+                            maxLines = 2
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(13.dp), tint = Color(0xFF38BDF8))
@@ -1579,7 +1602,10 @@ fun EnhancedTrainCard(
                     }
 
                     // Speed
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
                             text = "السرعة الحالية",
                             style = MaterialTheme.typography.labelSmall,
@@ -1598,7 +1624,10 @@ fun EnhancedTrainCard(
                     }
 
                     // ETA
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
                             text = "الوصول المقدر",
                             style = MaterialTheme.typography.labelSmall,

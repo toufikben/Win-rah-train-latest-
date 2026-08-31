@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -62,6 +63,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -484,7 +486,7 @@ fun MapScreen(viewModel: TrainViewModel) {
                                         background: #059669;
                                         color: white;
                                         font-family: sans-serif;
-                                        font-size: 10px;
+                                        font-size: 11px;
                                         font-weight: bold;
                                         padding: 3px 7px;
                                         max-width: 150px;
@@ -498,14 +500,14 @@ fun MapScreen(viewModel: TrainViewModel) {
                                         text-align: center;
                                     }
                                     .train-badge-sub {
-                                        font-size: 8px;
+                                        font-size: 9px;
                                         color: #D1FAE5;
                                         font-weight: normal;
                                     }
                                     .train-icon-pin {
                                         background: #059669;
-                                        width: 28px;
-                                        height: 28px;
+                                        width: 30px;
+                                        height: 30px;
                                         border-radius: 50% 50% 50% 0;
                                         transform: rotate(-45deg);
                                         display: flex;
@@ -774,21 +776,6 @@ fun MapScreen(viewModel: TrainViewModel) {
                         )
                     }
 
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(10.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xCC020617)
-                    ) {
-                        Text(
-                            text = if (trackGeometryLoading) "جاري تحميل هندسة الخريطة..." else if (trackGeometryError != null) "$mapSourceLabel\nتعذر الاتصال بالخادم" else mapSourceLabel,
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                        )
-                    }
-
                 // FLOATING MAP CONTROLS (Right side - exactly matching the screenshot)
 
                 Column(
@@ -801,7 +788,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                     // Track selected train button
                     Surface(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(48.dp)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(CircleShape)
                             .clickable {
                                 isFollowingTrain = !isFollowingTrain
@@ -823,7 +811,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                     // General map / overview button
                     Surface(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(48.dp)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(CircleShape)
                             .clickable {
                                 isFollowingTrain = false
@@ -840,7 +829,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                     // Top Green Target Location Button
                     Surface(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(48.dp)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(CircleShape)
                             .clickable {
                                 webViewInstance?.evaluateJavascript("(function(){if(window.centerOnTrain)window.centerOnTrain();else console.warn('علامة القطار غير جاهزة');})();", null)
@@ -861,7 +851,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                     // Zoom In Button (+)
                     Surface(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(48.dp)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(CircleShape)
                             .clickable {
                                 webViewInstance?.evaluateJavascript("if(window.zoomInMap) window.zoomInMap();", null)
@@ -877,7 +868,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                     // Zoom Out Button (-)
                     Surface(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(48.dp)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(CircleShape)
                             .clickable {
                                 webViewInstance?.evaluateJavascript("if(window.zoomOutMap) window.zoomOutMap();", null)
@@ -893,7 +885,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                     // Fullscreen Button
                     Surface(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(48.dp)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(CircleShape)
                             .clickable {
                                 webViewInstance?.evaluateJavascript("if(window.fitTrack) window.fitTrack();", null)
@@ -909,7 +902,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                     // Recenter / Layer Switch Button
                     Surface(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(48.dp)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(CircleShape)
                             .clickable {
                                 viewModel.refreshTrackGeometry(selectedSuburb)
@@ -933,7 +927,9 @@ fun MapScreen(viewModel: TrainViewModel) {
                     Surface(
                         shape = RoundedCornerShape(20.dp),
                         color = Color(0xDD1E293B),
-                        modifier = Modifier.clickable { showMapKeysMenu = true }
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clickable { showMapKeysMenu = true }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -1006,7 +1002,9 @@ fun MapScreen(viewModel: TrainViewModel) {
                                 Text(
                                     text = if (primaryTrain?.destinationName != null) "نحو ${primaryTrain.destinationName}" else "محطة الانتظار: ${selectedStation.name}",
                                     color = Color(0xFFCBD5E1),
-                                    style = MaterialTheme.typography.labelSmall
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                             Surface(
@@ -1018,6 +1016,8 @@ fun MapScreen(viewModel: TrainViewModel) {
                                     color = trainStatusColor,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
                                 )
                             }
@@ -1029,9 +1029,9 @@ fun MapScreen(viewModel: TrainViewModel) {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            TrainInfoMetric("الوصول", if (primaryTrain?.etaToWaitingStationMinutes != null) "${trainEta} د" else "—")
-                            TrainInfoMetric("السرعة", if (primaryTrain?.speedKmh != null) "${trainSpeed} كم/س" else "—")
-                            TrainInfoMetric("المسافة", if (primaryTrain?.distanceToWaitingStationKm != null) "${trainDistKm} كم" else "—")
+                            TrainInfoMetric("الوصول", if (primaryTrain?.etaToWaitingStationMinutes != null) "${trainEta} د" else "—", Modifier.weight(1f))
+                            TrainInfoMetric("السرعة", if (primaryTrain?.speedKmh != null) "${trainSpeed} كم/س" else "—", Modifier.weight(1f))
+                            TrainInfoMetric("المسافة", if (primaryTrain?.distanceToWaitingStationKm != null) "${trainDistKm} كم" else "—", Modifier.weight(1f))
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1045,10 +1045,14 @@ fun MapScreen(viewModel: TrainViewModel) {
                                 text = "المصدر: بيانات مباشرة • ${mapSourceLabel.substringBefore("\\n")}",
                                 color = Color(0xFF94A3B8),
                                 style = MaterialTheme.typography.labelSmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
                             Surface(
-                                modifier = Modifier.clickable {
+                                modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                    .clickable {
                                     if (primaryTrain != null) {
                                         isFollowingTrain = !isFollowingTrain
                                         webViewInstance?.evaluateJavascript("(function(){if(window.setFollowTrain)window.setFollowTrain($isFollowingTrain);else console.warn('خريطة التتبع غير جاهزة');})();", null)
@@ -1077,8 +1081,11 @@ fun MapScreen(viewModel: TrainViewModel) {
 }
 
 @Composable
-private fun TrainInfoMetric(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun TrainInfoMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Text(
             text = value,
             color = Color.White,
@@ -1088,7 +1095,9 @@ private fun TrainInfoMetric(label: String, value: String) {
         Text(
             text = label,
             color = Color(0xFF94A3B8),
-            style = MaterialTheme.typography.labelSmall
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

@@ -91,6 +91,8 @@ android {
       // Production must never ship diagnostics or mock live-train data.
       buildConfigField("boolean", "USE_MOCK_LIVE_DATA", "false")
       buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "false")
+      // Release must never inherit temporary write-test environment variables.
+      buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", "false")
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
