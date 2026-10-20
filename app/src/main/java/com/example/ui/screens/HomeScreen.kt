@@ -117,6 +117,7 @@ fun HomeScreen(
     val selectedLineAlertModal by viewModel.selectedLineAlertModal.collectAsState()
     val nearbyStations by viewModel.nearbyStations.collectAsState()
     val selectedInterchange by viewModel.selectedInterchange.collectAsState()
+    val serverWaking by viewModel.serverWaking.collectAsState()
 
     var reportingTrain by remember { mutableStateOf<ActiveTrain?>(null) }
     var showSetAlarmDialog by remember { mutableStateOf(false) }
@@ -147,7 +148,7 @@ fun HomeScreen(
                     )
                 }
                 Text(
-                    text = "رادار قطارات الجزائر الحي • مواقيت دقيقة ومنبه وصول",
+                    text = "رادار قطارات الضواحي • مشاركة الركاب ومنبه النزول",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF94A3B8)
                 )
@@ -232,6 +233,31 @@ fun HomeScreen(
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
+        }
+
+        if (serverWaking) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1E3A8A),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "الخادم يستيقظ… قد يستغرق ذلك نصف دقيقة",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White
+                    )
+                }
+            }
         }
 
         // FEEDBACK BANNER
@@ -874,7 +900,7 @@ fun HomeScreen(
                                 ) {
                                     Text(text = level.emoji, fontSize = 20.sp)
                                     Text(
-                                        text = level.name,
+                                        text = level.titleAr,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White

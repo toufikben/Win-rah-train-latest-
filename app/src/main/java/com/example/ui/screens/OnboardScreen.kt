@@ -853,7 +853,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                             ) {
                                 Text(text = level.emoji, fontSize = 18.sp)
                                 Text(
-                                    text = if (isSelected) "✓ ${level.name}" else level.name,
+                                    text = if (isSelected) "✓ ${level.titleAr}" else level.titleAr,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = if (isSelected) Color(level.colorHex) else Color.White,
