@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
 
                         if (pendingRestore != null) {
                             AlertDialog(
-                                onDismissRequest = { viewModel.answerPendingRestore(resume = false) },
+                                onDismissRequest = { /* an explicit answer is required */ },
                                 title = { Text("مشاركة سابقة لم تكتمل") },
                                 text = {
                                     Text(

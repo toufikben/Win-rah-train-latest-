@@ -11,12 +11,16 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.LiveTrainRepository
+import com.example.data.TrainRepository
 import com.example.data.local.LocalMonitorSessionStore
 import com.example.data.local.PersistentAppLogger
 import com.example.data.remote.dto.ObservationRequest
+import com.example.model.CorridorExitPolicy
+import com.example.model.CorridorExitState
 import com.example.model.MonitorBinding
 import com.example.model.TrainDirection
 import com.example.notification.TrainNotificationHelper
+import com.example.utils.GeoUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,8 +32,15 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 
-/** Keeps an active, user-started broadcast alive while the app is backgrounded. */
+/**
+ * Keeps an active, user-started broadcast alive while the app is backgrounded.
+ *
+ * Note: after process death Android may redeliver the start intent, but on
+ * Android 12+ a location foreground service cannot be started from the
+ * background, so such a restart ends as Stopped(ERROR) instead of resuming.
+ */
 class TrainTrackingService : Service() {
     companion object {
         const val ACTION_START = "dz.winrah.trainradar.action.START_TRACKING"
@@ -39,6 +50,7 @@ class TrainTrackingService : Service() {
         const val EXTRA_DIRECTION = "direction"
         const val EXTRA_TRIP_ID = "trip_id"
         const val EXTRA_TRAIN_ID = "train_id"
+        const val EXTRA_STOP_REASON = "stop_reason"
         const val TAG = "WinRahTrackingService"
         private const val EXPIRY_CHECK_INTERVAL_MS = 60_000L
     }
@@ -49,7 +61,7 @@ class TrainTrackingService : Service() {
     private lateinit var sessionStore: LocalMonitorSessionStore
     private var sessionJob: Job? = null
     private var initialized = false
-    @Volatile private var stopping = false
+    private val stopping = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -62,19 +74,27 @@ class TrainTrackingService : Service() {
             initialized = true
         } catch (error: Exception) {
             log("SERVICE_INITIALIZATION_FAILED", error)
-            BroadcastStatusRepository.update(BroadcastState.Stopped(StopReason.ERROR))
-            stopSelf()
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         log("SERVICE_ON_START_COMMAND action=${intent?.action} startId=$startId")
+        // startForegroundService() obliges startForeground() before any stop,
+        // otherwise Android 8+ crashes the app.
+        if (!enterForeground()) {
+            BroadcastStatusRepository.update(BroadcastState.Stopped(StopReason.ERROR))
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!initialized) {
-            stopSelf(startId)
+            finish(StopReason.ERROR, clearSession = false)
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_STOP) {
-            finish(StopReason.USER, clearSession = true)
+            val reason = runCatching {
+                StopReason.valueOf(intent.getStringExtra(EXTRA_STOP_REASON) ?: StopReason.USER.name)
+            }.getOrDefault(StopReason.USER)
+            finish(reason, clearSession = true, endOnServer = true)
             return START_NOT_STICKY
         }
 
@@ -93,40 +113,40 @@ class TrainTrackingService : Service() {
         }
         if (!hasLocationPermission()) {
             log("START_REJECTED_LOCATION_PERMISSION_MISSING")
-            finish(StopReason.PERMISSION, clearSession = true)
-            return START_NOT_STICKY
-        }
-        if (!enterForeground()) {
-            finish(StopReason.ERROR, clearSession = false)
+            finish(StopReason.PERMISSION, clearSession = true, endOnServer = true, sessionId = sessionId)
             return START_NOT_STICKY
         }
 
-        val binding = MonitorBinding(sessionId, lineId, direction, tripId, trainId)
         if (sessionJob?.isActive == true) return START_REDELIVER_INTENT
+        val binding = MonitorBinding(sessionId, lineId, direction, tripId, trainId)
         BroadcastStatusRepository.update(BroadcastState.Starting)
         sessionJob = serviceScope.launch { runSession(binding) }
-        // Android can recreate the service after process death and redeliver the binding intent.
         return START_REDELIVER_INTENT
     }
 
     private suspend fun runSession(binding: MonitorBinding) {
-        if (!resumeWithRetry(binding)) return
-        sessionStore.save(binding)
-
+        // Hold GPS from the start so updates never pause while the session is validated.
         if (!locationCoordinator.acquire(GpsOwner.BROADCAST_SERVICE)) {
             log("LOCATION_START_FAILED")
-            finish(StopReason.PERMISSION, clearSession = true)
+            finish(StopReason.PERMISSION, clearSession = true, endOnServer = true, sessionId = binding.sessionId)
             return
         }
+        if (!resumeWithRetry(binding)) return
 
-        val startedAtMs = System.currentTimeMillis()
+        // The age limit counts from the first start of this session, not from each resume.
+        val existing = runCatching { sessionStore.load() }.getOrNull()
+        if (existing?.sessionId != binding.sessionId) sessionStore.save(binding)
+        val startedAtMs = runCatching { sessionStore.savedAtMs() }.getOrNull()?.takeIf { it > 0L }
+            ?: System.currentTimeMillis()
         var lastAcceptedAtMs: Long? = null
         val throttle = ObservationThrottle()
         val backoff = ServerBackoff()
         var serverRetryAtMs = 0L
+        var corridorState = CorridorExitState()
+        val lineStations = TrainRepository.suburbLines.firstOrNull { it.id == binding.lineId }?.stations.orEmpty()
 
         serviceScope.launch {
-            while (isActive && !stopping) {
+            while (isActive && !stopping.get()) {
                 delay(EXPIRY_CHECK_INTERVAL_MS)
                 if (SessionRestorePolicy.isExpired(startedAtMs, lastAcceptedAtMs, System.currentTimeMillis())) {
                     log("SESSION_EXPIRED")
@@ -135,13 +155,26 @@ class TrainTrackingService : Service() {
             }
         }
 
-        BroadcastStatusRepository.update(BroadcastState.Sending(lastAcceptedAtMs = null, lastAttemptAtMs = null))
+        publish(BroadcastState.Sending(lastAcceptedAtMs = null, lastAttemptAtMs = null))
         locationCoordinator.gpsData
             .filter { it.isGpsActive && it.latitude != 0.0 && it.longitude != 0.0 }
             .collect { gps ->
                 val now = System.currentTimeMillis()
+                if (stopping.get()) return@collect
+
+                // Corridor exit is enforced here so it also works with the app closed.
+                if (lineStations.size >= 2) {
+                    val distance = GeoUtils.findClosestRailwaySegmentDistanceMeters(gps.latitude, gps.longitude, lineStations)
+                    val decision = CorridorExitPolicy.evaluate(distance, gps.isDeadReckoning, true, now, corridorState)
+                    corridorState = decision.state
+                    if (decision.shouldStopBroadcast) {
+                        finish(StopReason.OUTSIDE_CORRIDOR, clearSession = true, endOnServer = true, sessionId = binding.sessionId)
+                        return@collect
+                    }
+                }
+
                 val accuracy = gps.accuracyMeters
-                if (stopping || accuracy == null || gps.isMock) return@collect
+                if (accuracy == null || gps.isMock) return@collect
                 if (now < serverRetryAtMs || !throttle.shouldAttempt(now)) return@collect
                 throttle.onAttempt(now)
                 try {
@@ -163,10 +196,10 @@ class TrainTrackingService : Service() {
                     backoff.reset()
                     if (response["accepted"] == true) {
                         lastAcceptedAtMs = now
-                        BroadcastStatusRepository.update(BroadcastState.Sending(lastAcceptedAtMs, now))
+                        publish(BroadcastState.Sending(lastAcceptedAtMs, now))
                     } else {
                         val reason = (response["rejection_reason"] ?: response["reason"] ?: "unknown").toString()
-                        BroadcastStatusRepository.update(BroadcastState.Rejected(reason, now))
+                        publish(BroadcastState.Rejected(reason, now))
                     }
                 } catch (error: HttpException) {
                     log("OBSERVATION_HTTP_${error.code()}", error)
@@ -175,14 +208,14 @@ class TrainTrackingService : Service() {
                         in 500..599, 429 -> {
                             val waitMs = backoff.nextDelayMs()
                             serverRetryAtMs = now + waitMs
-                            BroadcastStatusRepository.update(BroadcastState.ServerUnavailable(now, waitMs))
+                            publish(BroadcastState.ServerUnavailable(now, waitMs))
                         }
-                        else -> BroadcastStatusRepository.update(BroadcastState.Rejected("http_${error.code()}", now))
+                        else -> publish(BroadcastState.Rejected("http_${error.code()}", now))
                     }
                 } catch (error: IOException) {
                     val waitMs = backoff.nextDelayMs()
                     serverRetryAtMs = now + waitMs
-                    BroadcastStatusRepository.update(BroadcastState.ServerUnavailable(now, waitMs))
+                    publish(BroadcastState.ServerUnavailable(now, waitMs))
                 }
             }
     }
@@ -190,7 +223,7 @@ class TrainTrackingService : Service() {
     /** Validates the session with the server, retrying while the server is unreachable. */
     private suspend fun resumeWithRetry(binding: MonitorBinding): Boolean {
         val backoff = ServerBackoff()
-        while (!stopping) {
+        while (!stopping.get()) {
             try {
                 val verified = repository.resumeMonitorSession(
                     binding.sessionId, binding.lineId, binding.direction, binding.tripId, binding.trainId,
@@ -224,19 +257,31 @@ class TrainTrackingService : Service() {
 
     private suspend fun waitForServer(backoff: ServerBackoff) {
         val waitMs = backoff.nextDelayMs()
-        BroadcastStatusRepository.update(BroadcastState.ServerUnavailable(System.currentTimeMillis(), waitMs))
+        publish(BroadcastState.ServerUnavailable(System.currentTimeMillis(), waitMs))
         delay(waitMs)
+    }
+
+    /** Publishes the state and mirrors it in the ongoing notification. */
+    private fun publish(state: BroadcastState) {
+        BroadcastStatusRepository.update(state)
+        if (stopping.get()) return
+        runCatching {
+            TrainNotificationHelper.updateSharingNotification(this, statusText(state), stopPendingIntent())
+        }
+    }
+
+    private fun statusText(state: BroadcastState): String = when (state) {
+        is BroadcastState.Sending ->
+            if (state.lastAcceptedAtMs != null) "يصل موقعك إلى الخادم بنجاح" else "في انتظار أول موقع مقبول"
+        is BroadcastState.Rejected -> "الخادم يرفض الموقع حاليًا (ابتعدت عن السكة؟)"
+        is BroadcastState.ServerUnavailable -> "الخادم غير متاح؛ إعادة المحاولة تلقائيًا"
+        BroadcastState.Starting -> "جارٍ التحقق من الجلسة"
+        else -> "مشاركة الموقع"
     }
 
     private fun enterForeground(): Boolean {
         val notification = runCatching {
-            TrainNotificationHelper.buildOngoingTripNotification(
-                this,
-                currentSpeedKmh = 0f,
-                nextStationName = "جارٍ التحقق من الجلسة",
-                isTunnel = false,
-                stopIntent = stopPendingIntent(),
-            )
+            TrainNotificationHelper.buildSharingNotification(this, statusText(BroadcastState.Starting), stopPendingIntent())
         }.getOrElse {
             log("NOTIFICATION_BUILD_FAILED", it)
             return false
@@ -269,20 +314,19 @@ class TrainTrackingService : Service() {
     private fun finish(
         reason: StopReason,
         clearSession: Boolean,
-        endOnServer: Boolean = reason == StopReason.USER,
+        endOnServer: Boolean = false,
         sessionId: String? = null,
     ) {
-        if (stopping) return
-        stopping = true
+        if (!stopping.compareAndSet(false, true)) return
         log("SERVICE_FINISH reason=$reason clear=$clearSession")
         BroadcastStatusRepository.update(BroadcastState.Stopped(reason))
-        val idToEnd = sessionId ?: runCatching { sessionStore.load()?.sessionId }.getOrNull()
-        if (clearSession) runCatching { sessionStore.clear() }.onFailure { Log.w(TAG, "clear failed", it) }
-        if (endOnServer && idToEnd != null) {
-            // Best effort; the server also expires silent sessions.
+        val idToEnd = sessionId ?: if (initialized) runCatching { sessionStore.load()?.sessionId }.getOrNull() else null
+        if (clearSession && initialized) runCatching { sessionStore.clear() }.onFailure { Log.w(TAG, "clear failed", it) }
+        if (endOnServer && idToEnd != null && initialized) {
+            // Best effort on a scope that outlives this service; the server also expires silent sessions.
             CoroutineScope(Dispatchers.IO).launch { runCatching { repository.endMonitorSession(idToEnd) } }
         }
-        runCatching { locationCoordinator.release(GpsOwner.BROADCAST_SERVICE) }
+        if (initialized) runCatching { locationCoordinator.release(GpsOwner.BROADCAST_SERVICE) }
         runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
         stopSelf()
     }

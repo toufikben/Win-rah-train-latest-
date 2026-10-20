@@ -699,6 +699,42 @@ fun SettingsScreen(
                         Divider(color = Color(0xFF334155), thickness = 0.6.dp)
                         Spacer(modifier = Modifier.height(10.dp))
 
+                        // Anonymous device id: quoted in data access/deletion requests
+                        val deviceId = remember { viewModel.anonymousDeviceId() }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "معرّف جهازك المجهول (لطلبات حذف البيانات):",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF94A3B8)
+                                )
+                                Text(
+                                    text = deviceId,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFCBD5E1)
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("WinRah device id", deviceId))
+                                    Toast.makeText(context, "تم نسخ المعرّف", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "نسخ المعرّف",
+                                    tint = Color(0xFF94A3B8),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
                         // Free App & No Ads Banner + Contribution Welcome
                         Surface(
                             shape = RoundedCornerShape(12.dp),

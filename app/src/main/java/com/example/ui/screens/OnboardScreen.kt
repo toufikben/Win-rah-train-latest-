@@ -95,6 +95,7 @@ fun OnboardScreen(viewModel: TrainViewModel) {
         )
     }
     val isOnboard by viewModel.isOnboardMode.collectAsState()
+    val broadcastState by viewModel.broadcastState.collectAsState()
     val isOnboardActivationPending by viewModel.isOnboardActivationPending.collectAsState()
     val selectedCrowdingReport by viewModel.selectedCrowdingReport.collectAsState()
     val selectedDelayReport by viewModel.selectedDelayReport.collectAsState()
@@ -417,13 +418,17 @@ fun OnboardScreen(viewModel: TrainViewModel) {
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "عند ركوبك القطار، يساهم تشغيل البث في إفادة المسافرين في المحطات القادمة بالوقت الدقيق والموقع المباشر للقطار على السكة.",
+                    text = "عند ركوبك القطار، تساعد مشاركة موقعك المسافرين في المحطات القادمة على معرفة مكان القطار وموعد وصوله التقريبي.",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isOnboard) Color(0xFFD1FAE5) else Color(0xFF94A3B8),
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                BroadcastStateLine(broadcastState)
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1073,4 +1078,37 @@ fun OnboardScreen(viewModel: TrainViewModel) {
             onDismiss = { viewModel.closeInterchangeModal() }
         )
     }
+}
+
+
+/** One honest line about what the sharing service is doing right now. */
+@Composable
+private fun BroadcastStateLine(state: com.example.location.BroadcastState) {
+    val now = System.currentTimeMillis()
+    val (message, color) = when (state) {
+        is com.example.location.BroadcastState.Sending -> {
+            val accepted = state.lastAcceptedAtMs
+            if (accepted == null) {
+                "في انتظار أول موقع يقبله الخادم…" to Color(0xFFFDE68A)
+            } else {
+                val seconds = ((now - accepted) / 1000).coerceAtLeast(0)
+                "آخر موقع قُبل قبل $seconds ثانية" to Color(0xFF6EE7B7)
+            }
+        }
+        is com.example.location.BroadcastState.Rejected ->
+            "الخادم يرفض موقعك حاليًا (هل أنت قرب السكة؟)" to Color(0xFFFCA5A5)
+        is com.example.location.BroadcastState.ServerUnavailable ->
+            "الخادم غير متاح؛ إعادة المحاولة خلال ${state.retryInMs / 1000} ثانية" to Color(0xFFFDE68A)
+        com.example.location.BroadcastState.Starting -> "جارٍ بدء المشاركة…" to Color(0xFFBFDBFE)
+        is com.example.location.BroadcastState.Stopped, com.example.location.BroadcastState.Idle ->
+            "المشاركة متوقفة" to Color(0xFF94A3B8)
+    }
+    Text(
+        text = message,
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = FontWeight.SemiBold,
+        color = color,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth()
+    )
 }

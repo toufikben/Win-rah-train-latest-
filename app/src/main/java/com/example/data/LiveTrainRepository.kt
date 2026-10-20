@@ -339,6 +339,8 @@ class LiveTrainRepository(
     @Volatile
     private var inMemoryMonitorId: String? = null
 
+    fun anonymousMonitorId(): String = getAnonymousMonitorId()
+
     private fun getAnonymousMonitorId(): String {
         if (context == null) {
             return inMemoryMonitorId ?: "android-${UUID.randomUUID()}".also { inMemoryMonitorId = it }
