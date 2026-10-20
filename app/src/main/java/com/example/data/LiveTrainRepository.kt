@@ -158,6 +158,11 @@ class LiveTrainRepository(
         return api.submitObservation(request)
     }
 
+    /** Wakes the hosted backend; any HTTP status counts as awake. */
+    suspend fun wakeServer() {
+        api.health()
+    }
+
     suspend fun submitReport(request: ReportRequest) {
         api.submitReport(request)
     }
@@ -204,8 +209,10 @@ class LiveTrainRepository(
             waitingStation.latitude,
             waitingStation.longitude
         ).toFloat()
+        // The server ETA targets the train's next stop. It is shown only when that
+        // stop is the rider's own station; otherwise the arrival time is unknown.
         val etaMinutes = dto.eta
-            ?.takeIf { nextStation != null && sameStation(it.stationId, nextStation) }
+            ?.takeIf { sameStation(it.stationId, waitingStation) }
             ?.estimatedArrivalMin
         val direction = dto.direction?.let {
             when (it.uppercase()) {
@@ -225,7 +232,7 @@ class LiveTrainRepository(
         return ActiveTrain(
             id = id,
             tripId = dto.tripId,
-            trainNumber = id,
+            trainNumber = trainLabel(direction, line),
             suburbId = line.id,
             latitude = position.latitude,
             longitude = position.longitude,
@@ -250,6 +257,13 @@ class LiveTrainRepository(
             lastUpdated = dto.lastUpdate,
             truth = dto.truth
         )
+    }
+
+    /** Riders know the destination, not the internal id: "قطار ← الثنية". */
+    internal fun trainLabel(direction: TrainDirection?, line: SuburbLine): String = when (direction) {
+        TrainDirection.INBOUND -> "قطار ← ${line.inboundTerminus}"
+        TrainDirection.OUTBOUND -> "قطار ← ${line.outboundTerminus}"
+        else -> "قطار على ${line.name}"
     }
 
     private fun toUiStation(dto: StationDto): Station {
@@ -322,12 +336,18 @@ class LiveTrainRepository(
             .replace("ـ", "")
             .replace(" ", "")
 
+    @Volatile
+    private var inMemoryMonitorId: String? = null
+
     private fun getAnonymousMonitorId(): String {
-        val preferences = context?.getSharedPreferences("winrah_identity", Context.MODE_PRIVATE)
-        val existing = preferences?.getString("anonymous_monitor_id", null)
+        if (context == null) {
+            return inMemoryMonitorId ?: "android-${UUID.randomUUID()}".also { inMemoryMonitorId = it }
+        }
+        val preferences = context.getSharedPreferences("winrah_identity", Context.MODE_PRIVATE)
+        val existing = preferences.getString("anonymous_monitor_id", null)
         if (!existing.isNullOrBlank()) return existing
         val generated = "android-${UUID.randomUUID()}"
-        preferences?.edit()?.putString("anonymous_monitor_id", generated)?.apply()
+        preferences.edit().putString("anonymous_monitor_id", generated).apply()
         return generated
     }
 }

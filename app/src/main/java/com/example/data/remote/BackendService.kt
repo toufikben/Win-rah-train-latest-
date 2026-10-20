@@ -54,8 +54,10 @@ object BackendService {
     }
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        // The hosted backend can take ~35 s to wake from idle; shorter timeouts
+        // turned every first request of the day into an error.
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .addInterceptor(writeGuardInterceptor)

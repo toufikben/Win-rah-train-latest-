@@ -1,7 +1,9 @@
 package com.example.data
 
 import com.example.data.remote.TrainApi
+import com.example.data.remote.dto.EtaDto
 import com.example.data.remote.dto.LiveTrainDto
+import com.example.data.remote.dto.PositionDto
 import com.example.data.remote.dto.MonitorSessionDto
 import com.example.data.remote.dto.MonitorSessionRequest
 import com.example.data.remote.dto.ObservationRequest
@@ -110,14 +112,61 @@ class LiveTrainRepositoryTest {
         assertEquals("station-uuid", repository.canonicalStationId(TrainRepository.suburbLines.first().stations.first()))
     }
 
+    @Test
+    fun uuidNeverShownAsTrainNumber() = runTest {
+        val repository = LiveTrainRepository(FakeTrainApi(trips = listOf(thenaTrip), live = listOf(liveTrain())))
+        val waiting = TrainRepository.suburbLines.first().stations[5]
+
+        val train = repository.getLiveTrainsForLine(TrainRepository.suburbLines.first(), waiting).single()
+
+        assertEquals("قطار ← الجزائر (آغا)", train.trainNumber)
+    }
+
+    @Test
+    fun etaOnlyForWaitingStation() = runTest {
+        val line = TrainRepository.suburbLines.first()
+        val next = line.stations[3]
+        val stations = listOf(StationDto("next-uuid", next.name, null, null, next.latitude, next.longitude))
+        val live = liveTrain(eta = EtaDto("next-uuid", 4, 6, "MEDIUM"))
+        val repository = LiveTrainRepository(FakeTrainApi(trips = listOf(thenaTrip), stations = stations, live = listOf(live)))
+
+        val atNext = repository.getLiveTrainsForLine(line, next).single()
+        val elsewhere = repository.getLiveTrainsForLine(line, line.stations[8]).single()
+
+        assertEquals(4, atNext.etaToWaitingStationMinutes)
+        assertNull(elsewhere.etaToWaitingStationMinutes)
+    }
+
+    private val thenaTrip = TripDto(
+        id = "trip-uuid",
+        trainId = "34f9c796-095b-5b03-854a-13df562dddf1",
+        lineId = "bd566e47-d079-561d-84d1-f66283653b14",
+        direction = "INBOUND",
+        scheduledDeparture = null,
+        scheduledArrival = null,
+        status = "SCHEDULED",
+    )
+
+    private fun liveTrain(eta: EtaDto? = null) = LiveTrainDto(
+        id = "34f9c796-095b-5b03-854a-13df562dddf1",
+        tripId = "trip-uuid",
+        trainId = "34f9c796-095b-5b03-854a-13df562dddf1",
+        lastObservedPosition = PositionDto(36.73, 3.40),
+        direction = "INBOUND",
+        eta = eta,
+    )
+
     private class FakeTrainApi(
         private val trips: List<TripDto>,
         private val stations: List<StationDto> = emptyList(),
+        private val live: List<LiveTrainDto> = emptyList(),
     ) : TrainApi {
+        override suspend fun health(): retrofit2.Response<okhttp3.ResponseBody> =
+            retrofit2.Response.success(null)
         override suspend fun getStations(): List<StationDto> = stations
         override suspend fun getTrips(lineId: String?): List<TripDto> = trips
         override suspend fun getTripStops(tripId: String): List<TripStopDto> = emptyList()
-        override suspend fun getLiveTrains(): List<LiveTrainDto> = emptyList()
+        override suspend fun getLiveTrains(): List<LiveTrainDto> = live
         override suspend fun getRailwaySegments(): RailwaySegmentsResponse = RailwaySegmentsResponse()
         override suspend fun getNearbyTrains(
             latitude: Double,
