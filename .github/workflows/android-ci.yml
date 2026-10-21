@@ -30,6 +30,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The default list includes the removed 'tools' package and fails.
+          packages: platform-tools
 
       - name: Install Android SDK packages
         shell: bash
