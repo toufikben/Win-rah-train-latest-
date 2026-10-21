@@ -75,7 +75,60 @@ data class LiveTrainDto(
     @Json(name = "truth") val truth: String? = null,
     @Json(name = "freshness") val freshness: String? = null,
     @Json(name = "line_order") val lineOrder: Int? = null,
-    @Json(name = "line_id") val lineId: String? = null
+    @Json(name = "line_id") val lineId: String? = null,
+    // Train labels (backend phase 1): matched trains carry their timetable number.
+    @Json(name = "matched") val matched: Boolean? = null,
+    @Json(name = "train_number") val trainNumber: String? = null,
+    @Json(name = "origin_name_ar") val originNameAr: String? = null,
+    @Json(name = "destination_name_ar") val destinationNameAr: String? = null,
+    @Json(name = "station_event") val stationEvent: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class LineStationDto(
+    @Json(name = "id") val id: String,
+    @Json(name = "name_ar") val nameAr: String?,
+    @Json(name = "name_fr") val nameFr: String?,
+    @Json(name = "chainage_m") val chainageM: Double,
+    @Json(name = "served") val served: Boolean = true,
+)
+
+/** A line with its stations in running order (GET /lines). */
+@JsonClass(generateAdapter = true)
+data class LineDto(
+    @Json(name = "id") val id: String,
+    @Json(name = "code") val code: String?,
+    @Json(name = "name_ar") val nameAr: String?,
+    @Json(name = "name_fr") val nameFr: String?,
+    @Json(name = "status") val status: String? = "active",
+    @Json(name = "length_m") val lengthM: Double = 0.0,
+    @Json(name = "stations") val stations: List<LineStationDto> = emptyList(),
+)
+
+@JsonClass(generateAdapter = true)
+data class DepartureEtaDto(
+    @Json(name = "min") val min: Int,
+    @Json(name = "max") val max: Int,
+)
+
+/** A train calling at a station today (GET /stations/{id}/departures). */
+@JsonClass(generateAdapter = true)
+data class DepartureDto(
+    @Json(name = "trip_id") val tripId: String,
+    @Json(name = "train_number") val trainNumber: String?,
+    @Json(name = "line_id") val lineId: String?,
+    @Json(name = "direction") val direction: String?,
+    @Json(name = "origin_name_ar") val originNameAr: String?,
+    @Json(name = "destination_name_ar") val destinationNameAr: String?,
+    @Json(name = "continues_to") val continuesTo: String? = null,
+    @Json(name = "service_days") val serviceDays: String? = null,
+    @Json(name = "scheduled_time") val scheduledTime: String,
+    @Json(name = "scheduled_minute") val scheduledMinute: Int,
+    @Json(name = "express") val express: Boolean = false,
+    @Json(name = "skips_count") val skipsCount: Int = 0,
+    @Json(name = "truth") val truth: String = "scheduled",
+    @Json(name = "eta") val eta: DepartureEtaDto? = null,
+    @Json(name = "source_count") val sourceCount: Int = 0,
 )
 
 @JsonClass(generateAdapter = true)

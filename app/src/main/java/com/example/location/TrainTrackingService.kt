@@ -194,6 +194,7 @@ class TrainTrackingService : Service() {
                         )
                     )
                     backoff.reset()
+                    throttle.applySuggested(response["suggested_interval_s"] as? Number)
                     if (response["accepted"] == true) {
                         lastAcceptedAtMs = now
                         publish(BroadcastState.Sending(lastAcceptedAtMs, now))

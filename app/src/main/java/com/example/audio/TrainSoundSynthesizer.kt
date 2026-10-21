@@ -19,10 +19,15 @@ enum class TrainSoundType(val id: String, val titleAr: String, val descriptionAr
 object TrainSoundSynthesizer {
 
     private var isPlaying = false
+    @Volatile private var volume = 1f
+    @Volatile private var asAlarm = false
 
-    suspend fun playSound(soundType: TrainSoundType) = withContext(Dispatchers.Default) {
+    /** [volume] 0..1; [alarm] routes through the alarm stream so it sounds even when media is muted. */
+    suspend fun playSound(soundType: TrainSoundType, volume: Float = 1f, alarm: Boolean = false) = withContext(Dispatchers.Default) {
         if (isPlaying) return@withContext
         isPlaying = true
+        this@TrainSoundSynthesizer.volume = volume.coerceIn(0f, 1f)
+        asAlarm = alarm
 
         try {
             when (soundType) {
@@ -171,7 +176,7 @@ object TrainSoundSynthesizer {
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setUsage(if (asAlarm) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
@@ -187,6 +192,7 @@ object TrainSoundSynthesizer {
                 .build()
 
             audioTrack.write(sound, 0, sound.size)
+            audioTrack.setVolume(volume)
             audioTrack.play()
 
             val durMs = (sound.size.toDouble() / sampleRate * 1000).toLong()
@@ -201,3 +207,5 @@ object TrainSoundSynthesizer {
         }
     }
 }
+
+fun trainSoundById(id: String): TrainSoundType = TrainSoundType.entries.firstOrNull { it.id == id } ?: TrainSoundType.ELECTRIC_HORN

@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- The wake-up alarm before the rider's stop is an alarm in the Play policy sense. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:name="com.example.WinRahApplication"
@@ -22,12 +25,25 @@
         android:label="${appLabel}"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="${usesCleartextTraffic}"
         android:theme="@style/Theme.MyApplication">
         <service
             android:name="com.example.location.TrainTrackingService"
             android:exported="false"
             android:foregroundServiceType="location" />
+        <service
+            android:name="com.example.alerts.ApproachAlertService"
+            android:exported="false"
+            android:foregroundServiceType="location|dataSync" />
+        <activity
+            android:name="com.example.alerts.WakeAlarmActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.MyApplication" />
         <activity
             android:name="com.example.MainActivity"
             android:exported="true"

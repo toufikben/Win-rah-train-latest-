@@ -167,6 +167,8 @@ class LiveTrainRepositoryTest {
         override suspend fun getTrips(lineId: String?): List<TripDto> = trips
         override suspend fun getTripStops(tripId: String): List<TripStopDto> = emptyList()
         override suspend fun getLiveTrains(): List<LiveTrainDto> = live
+        override suspend fun getLines(): List<com.example.data.remote.dto.LineDto> = emptyList()
+        override suspend fun getDepartures(stationId: String, limit: Int): List<com.example.data.remote.dto.DepartureDto> = emptyList()
         override suspend fun getRailwaySegments(): RailwaySegmentsResponse = RailwaySegmentsResponse()
         override suspend fun getNearbyTrains(
             latitude: Double,
