@@ -61,6 +61,8 @@ android {
     buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
     buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
     buildConfigField("boolean", "USE_MOCK_LIVE_DATA", configuredMockLiveData.toString())
+    // Fake-GPS apps are accepted only by the separate .testwrite build, for field testing.
+    buildConfigField("boolean", "ALLOW_MOCK_LOCATION", configuredTestWriteApp.toString())
     manifestPlaceholders["usesCleartextTraffic"] = false
     manifestPlaceholders["appLabel"] = if (configuredTestWriteApp) {
       "@string/app_name_test_write"
@@ -91,6 +93,7 @@ android {
       // Production must never ship diagnostics or mock live-train data.
       buildConfigField("boolean", "USE_MOCK_LIVE_DATA", "false")
       buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "false")
+      buildConfigField("boolean", "ALLOW_MOCK_LOCATION", "false")
       // Release honors the explicit release-time opt-in (see android-release.yml);
       // defaults to false when WINRAH_API_WRITES_ENABLED is not explicitly set.
       buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", requestedApiWritesEnabled.toString())

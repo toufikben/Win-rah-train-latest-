@@ -1,5 +1,6 @@
 package com.example.location
 
+import dz.winrah.trainradar.BuildConfig
 import android.Manifest
 import android.app.PendingIntent
 import android.app.Service
@@ -174,7 +175,7 @@ class TrainTrackingService : Service() {
                 }
 
                 val accuracy = gps.accuracyMeters
-                if (accuracy == null || gps.isMock) return@collect
+                if (accuracy == null || (gps.isMock && !BuildConfig.ALLOW_MOCK_LOCATION)) return@collect
                 if (now < serverRetryAtMs || !throttle.shouldAttempt(now)) return@collect
                 throttle.onAttempt(now)
                 try {
