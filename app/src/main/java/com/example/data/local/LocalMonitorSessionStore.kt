@@ -52,6 +52,24 @@ class LocalMonitorSessionStore(context: Context) {
         }
     }
 
+    /** Wall-clock time of the last save, or null when nothing is stored. */
+    @Synchronized
+    fun savedAtMs(): Long? {
+        helper.readableDatabase.query(
+            TABLE,
+            arrayOf(COLUMN_SAVED_AT),
+            "$COLUMN_ID = ?",
+            arrayOf(ROW_ID.toString()),
+            null,
+            null,
+            null,
+            "1",
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return null
+            return cursor.getLong(0)
+        }
+    }
+
     @Synchronized
     fun clear() {
         helper.writableDatabase.delete(TABLE, "$COLUMN_ID = ?", arrayOf(ROW_ID.toString()))

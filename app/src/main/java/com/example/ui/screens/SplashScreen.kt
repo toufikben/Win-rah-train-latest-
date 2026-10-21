@@ -132,9 +132,9 @@ fun AnimatedSplashScreen(
         showContent = true
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 2600, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing)
         )
-        delay(200)
+        delay(100)
         onSplashFinished()
     }
 
@@ -194,7 +194,7 @@ fun AnimatedSplashScreen(
                         Text(text = "🇩🇿", fontSize = 16.sp)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "الشبكة الوطنية للسكك الحديدية SNTF",
+                            text = "وين راه التران",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF6EE7B7),
                             fontWeight = FontWeight.Bold
@@ -332,7 +332,7 @@ fun AnimatedSplashScreen(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = "تتبع دقيق للضواحي • منبه النزول الذكي • تقارير الاكتظاظ",
+                            text = "تطبيق مجتمعي مستقل • غير تابع لـ SNTF",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF94A3B8),
                             textAlign = TextAlign.Center
@@ -373,7 +373,7 @@ fun AnimatedSplashScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (progress.value < 0.5f) "جاري الاتصال بالأقمار الصناعية GPS..." else "جاري مزامنة خطوط ومحطات القطار...",
+                        text = "جارٍ التحميل…",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFFCBD5E1)
                     )

@@ -18,6 +18,10 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface TrainApi {
+    /** Cheap request used to wake the hosted backend; the body is ignored. */
+    @GET("health")
+    suspend fun health(): retrofit2.Response<okhttp3.ResponseBody>
+
     @GET("stations")
     suspend fun getStations(): List<StationDto>
 

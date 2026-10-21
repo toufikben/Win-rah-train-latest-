@@ -23,11 +23,14 @@ data class LiveGpsData(
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
     val speedKmh: Float = 0.0f,
-    val accuracyMeters: Float = 0.0f,
+    /** Null when the fix carries no accuracy estimate; such fixes are never sent. */
+    val accuracyMeters: Float? = null,
     val altitudeMeters: Double = 0.0,
     val timestamp: Long = 0L,
     val isGpsActive: Boolean = false,
     val isDeadReckoning: Boolean = false, // True when operating in tunnel/blind spot estimation
+    /** True when Android reports the fix as coming from a mock-location app. */
+    val isMock: Boolean = false,
     val deadReckoningDurationSec: Int = 0
 )
 

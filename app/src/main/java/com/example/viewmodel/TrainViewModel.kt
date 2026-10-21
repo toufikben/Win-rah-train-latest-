@@ -22,8 +22,14 @@ import com.example.data.TrainRepository
 import com.example.data.remote.dto.ObservationRequest
 import com.example.data.remote.dto.ReportDto
 import com.example.data.remote.dto.ReportRequest
+import com.example.location.BroadcastState
+import com.example.location.BroadcastStatusRepository
 import com.example.location.FirstFixResult
+import com.example.location.GpsOwner
 import com.example.location.LocationTrackingCoordinatorProvider
+import com.example.location.RestoreDecision
+import com.example.location.SessionRestorePolicy
+import com.example.location.StopReason
 import com.example.location.TrainTrackingService
 import com.example.model.ActiveTrain
 import com.example.model.AlertSeverity
@@ -50,6 +56,7 @@ import com.example.model.VerificationStatus
 import com.example.model.WaitingSelection
 import com.example.notification.TrainNotificationHelper
 import com.example.utils.GeoUtils
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -58,6 +65,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -98,6 +106,24 @@ class TrainViewModel private constructor(
 
     private val _liveDataError = MutableStateFlow<String?>(null)
     val liveDataError: StateFlow<String?> = _liveDataError.asStateFlow()
+
+    /** True while the first request of this process waits for the backend to wake up. */
+    private val _serverWaking = MutableStateFlow(false)
+    val serverWaking: StateFlow<Boolean> = _serverWaking.asStateFlow()
+    private var serverWarmedUp = false
+
+    /** Polling runs only while a screen of the app is visible. */
+    private val appVisible = MutableStateFlow(true)
+
+    fun setAppVisible(visible: Boolean) {
+        appVisible.value = visible
+        if (!visible && !_isOnboardActivationPending.value) {
+            locationTracker.release(GpsOwner.UI)
+        }
+    }
+
+    /** Anonymous device id shown in settings so users can request data deletion. */
+    fun anonymousDeviceId(): String = liveTrainRepository.anonymousMonitorId()
 
     // Deferred local catalog entries are not shown as operational until the backend publishes trips.
     private val _suburbs = MutableStateFlow(
@@ -147,8 +173,14 @@ class TrainViewModel private constructor(
     private val _selectedTrain = MutableStateFlow<ActiveTrain?>(null)
     val selectedTrain: StateFlow<ActiveTrain?> = _selectedTrain.asStateFlow()
 
+    /** Driven only by [BroadcastStatusRepository]; never set from UI code paths. */
     private val _isOnboardMode = MutableStateFlow(false)
     val isOnboardMode: StateFlow<Boolean> = _isOnboardMode.asStateFlow()
+    val broadcastState: StateFlow<BroadcastState> = BroadcastStatusRepository.state
+
+    /** Set when a recent unfinished broadcast exists and the user must decide. */
+    private val _pendingRestore = MutableStateFlow<MonitorBinding?>(null)
+    val pendingRestore: StateFlow<MonitorBinding?> = _pendingRestore.asStateFlow()
     private val _isOnboardActivationPending = MutableStateFlow(false)
     val isOnboardActivationPending: StateFlow<Boolean> = _isOnboardActivationPending.asStateFlow()
 
@@ -242,15 +274,31 @@ class TrainViewModel private constructor(
     private val radarRefreshMutex = Mutex()
     private val _monitorBinding = MutableStateFlow<MonitorBinding?>(null)
     val monitorBinding: StateFlow<MonitorBinding?> = _monitorBinding.asStateFlow()
+    private val reportInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private val _activeSessionReports = MutableStateFlow<List<ReportDto>>(emptyList())
     val activeSessionReports: StateFlow<List<ReportDto>> = _activeSessionReports.asStateFlow()
-    private var lastObservationSentAt = 0L
     private var corridorExitState = CorridorExitState()
-    private val _lastObservationAcceptedAt = MutableStateFlow<Long?>(null)
-    val lastObservationAcceptedAt: StateFlow<Long?> = _lastObservationAcceptedAt.asStateFlow()
 
     init {
         restoreLocalState()
+
+        viewModelScope.launch {
+            var initial = true
+            BroadcastStatusRepository.state.collect { state ->
+                _isOnboardMode.value = state.isActive
+                // 6: a service redelivered after process death supersedes the restore prompt
+                if (state.isActive) _pendingRestore.value = null
+                val isNewEvent = !initial
+                initial = false
+                if (state is BroadcastState.Stopped && isNewEvent) {
+                    _monitorBinding.value = null
+                    _activeSessionReports.value = emptyList()
+                    corridorExitState = CorridorExitState()
+                    _verificationStatus.value = VerificationStatus.WAITING_GPS
+                    stopMessageFor(state.reason)?.let { _userFeedbackMessage.value = it }
+                }
+            }
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             restoreActiveMonitorSession()
@@ -265,18 +313,9 @@ class TrainViewModel private constructor(
                 if (gps.isGpsActive) {
                     updateNearbyStations(gps.latitude, gps.longitude)
                     if (_isOnboardMode.value) {
+                        // TrainTrackingService sends observations and owns the ongoing
+                        // notification; the ViewModel only verifies the corridor for the UI.
                         verifyPassengerLocation(gps)
-                        // TrainTrackingService is the sole observation sender during broadcast.
-                        // The ViewModel only observes GPS for UI verification and alerts.
-                        if (_isBackgroundNotificationEnabled.value) {
-                            val nextStName = _activeTrains.value.firstOrNull()?.nextStation?.name ?: "المحطة القادمة"
-                            TrainNotificationHelper.showOngoingTripNotification(
-                                app,
-                                gps.speedKmh,
-                                nextStName,
-                                gps.isDeadReckoning
-                            )
-                        }
                     }
                     checkDestinationAlarm(gps.latitude, gps.longitude)
                 }
@@ -418,24 +457,16 @@ class TrainViewModel private constructor(
         recalculateActiveTrains()
     }
 
-    fun toggleOnboardMode(enable: Boolean): Boolean {
+    fun toggleOnboardMode(enable: Boolean, reason: StopReason = StopReason.USER): Boolean {
         if (!enable) {
-            val binding = _monitorBinding.value
             _monitorBinding.value = null
             _activeSessionReports.value = emptyList()
             clearPersistedReportSelections()
             corridorExitState = CorridorExitState()
             _isOnboardActivationPending.value = false
-            locationTracker.stop()
-            stopTrainTrackingService()
-            TrainNotificationHelper.clearOngoingNotification(app)
-            _isOnboardMode.value = false
-            _verificationStatus.value = VerificationStatus.WAITING_GPS
-            if (binding != null) {
-                viewModelScope.launch(Dispatchers.IO) {
-                    runCatching { liveTrainRepository.endMonitorSession(binding.sessionId) }
-                }
-            }
+            // The service ends the session on the server, releases its GPS ownership
+            // and publishes Stopped(reason); other GPS owners (alarm) keep running.
+            requestServiceStop(reason)
             return true
         }
 
@@ -481,7 +512,7 @@ class TrainViewModel private constructor(
                     throw IllegalStateException("session_binding_mismatch")
                 }
                 PersistentAppLogger.write("GPS_FIRST_FIX_WAIT_BEGIN timeoutSeconds=45")
-                when (locationTracker.startAndAwaitFirstFix(45_000L)) {
+                when (locationTracker.acquireAndAwaitFirstFix(GpsOwner.UI, 45_000L)) {
                     FirstFixResult.START_FAILED -> {
                         PersistentAppLogger.write("GPS_START_FAILED requestAccepted=false")
                         throw IllegalStateException("location_start_failed")
@@ -521,21 +552,21 @@ class TrainViewModel private constructor(
                 )
                 restorePersistedReportSelections(session.id)
                 _activeSessionReports.value = emptyList()
-                // Hand the shared GPS coordinator to the foreground service.
-                // This prevents the ViewModel and service from owning callbacks together.
-                PersistentAppLogger.write("GPS_OWNERSHIP_HANDOFF_TO_SERVICE")
-                locationTracker.stop()
+                // The service acquires its own GPS ownership; the UI hold is released
+                // only after the service is started so updates never pause in between.
                 refreshActiveSessionReports()
-                startTrainTrackingService(
+                BroadcastStatusRepository.update(BroadcastState.Starting)
+                val started = startTrainTrackingService(
                     session.id,
                     session.lineId,
                     selection.direction,
                     session.tripId,
                     session.trainId,
                 )
-                _isOnboardMode.value = true
+                if (!started) throw IllegalStateException("service_start_failed")
+                locationTracker.release(GpsOwner.UI)
                 _isOnboardActivationPending.value = false
-                _userFeedbackMessage.value = "تم بدء البث الحقيقي من جهازك بعد إنشاء جلسة المراقبة."
+                _userFeedbackMessage.value = "بدأت مشاركة موقعك. يمكنك إيقافها من هنا أو من الإشعار."
             } catch (error: Exception) {
                 if (createdSessionId != null) {
                     runCatching { liveTrainRepository.endMonitorSession(createdSessionId) }
@@ -543,10 +574,10 @@ class TrainViewModel private constructor(
                 _monitorBinding.value = null
                 _activeSessionReports.value = emptyList()
                 clearPersistedReportSelections()
-                _isOnboardMode.value = false
                 _isOnboardActivationPending.value = false
-                locationTracker.stop()
-                stopTrainTrackingService()
+                locationTracker.release(GpsOwner.UI)
+                runCatching { app.stopService(Intent(app, TrainTrackingService::class.java)) }
+                BroadcastStatusRepository.update(BroadcastState.Stopped(StopReason.ERROR))
                 _verificationStatus.value = VerificationStatus.WAITING_GPS
                 PersistentAppLogger.write(
                     "BROADCAST_ACTIVATION_FAILED detail=${describeSessionFailure(error)}",
@@ -566,6 +597,8 @@ class TrainViewModel private constructor(
                     "الخادم رفض بيانات الجلسة (400). افتح شاشة التشخيص للتفاصيل."
                 } else if (error is HttpException && error.code() == 403) {
                     "البث محجوب في نسخة الاختبار الحالية لحماية خادم Production."
+                } else if (error.message == "service_start_failed") {
+                    "تعذر تشغيل المشاركة في الخلفية. افتح التطبيق وحاول مجددًا."
                 } else if (error.message == "session_binding_mismatch") {
                     "رفض الخادم جلسة لا تطابق القطار المطلوب؛ لم يبدأ البث."
                 } else {
@@ -606,7 +639,7 @@ class TrainViewModel private constructor(
         direction: TrainDirection,
         tripId: String?,
         trainId: String?,
-    ) {
+    ): Boolean {
         val intent = Intent(app, TrainTrackingService::class.java).apply {
             action = TrainTrackingService.ACTION_START
             putExtra(TrainTrackingService.EXTRA_SESSION_ID, sessionId)
@@ -615,15 +648,32 @@ class TrainViewModel private constructor(
             tripId?.let { putExtra(TrainTrackingService.EXTRA_TRIP_ID, it) }
             trainId?.let { putExtra(TrainTrackingService.EXTRA_TRAIN_ID, it) }
         }
-        runCatching { ContextCompat.startForegroundService(app, intent) }
-            .onFailure { _userFeedbackMessage.value = "تعذر تشغيل التتبع في الخلفية؛ سيستمر التتبع أثناء فتح التطبيق." }
+        return runCatching { ContextCompat.startForegroundService(app, intent) }
+            .onFailure { PersistentAppLogger.write("SERVICE_START_FAILED", it) }
+            .isSuccess
     }
 
-    private fun stopTrainTrackingService() {
+    /** Asks the running service to finish; it ends the server session and releases GPS. */
+    private fun requestServiceStop(reason: StopReason) {
+        if (!BroadcastStatusRepository.state.value.isActive) {
+            BroadcastStatusRepository.update(BroadcastState.Stopped(reason))
+            return
+        }
         val intent = Intent(app, TrainTrackingService::class.java).apply {
             action = TrainTrackingService.ACTION_STOP
+            putExtra(TrainTrackingService.EXTRA_STOP_REASON, reason.name)
         }
-        runCatching { app.stopService(intent) }
+        runCatching { app.startService(intent) }
+            .onFailure { runCatching { app.stopService(Intent(app, TrainTrackingService::class.java)) } }
+    }
+
+    private fun stopMessageFor(reason: StopReason): String? = when (reason) {
+        StopReason.USER -> null
+        StopReason.SESSION_INVALID -> "انتهت جلسة المشاركة على الخادم؛ ابدأ مشاركة جديدة إن كنت ما زلت في القطار."
+        StopReason.PERMISSION -> "توقفت المشاركة: صلاحية الموقع غير متاحة."
+        StopReason.EXPIRED -> "توقفت المشاركة تلقائيًا لطول المدة أو لانقطاع الإشارة الطويل."
+        StopReason.OUTSIDE_CORRIDOR -> "توقفت المشاركة تلقائيًا: ابتعد جهازك عن السكة الحديدية."
+        StopReason.ERROR -> "توقفت المشاركة بسبب خطأ غير متوقع."
     }
 
     fun refreshActiveSessionReports() {
@@ -646,7 +696,7 @@ class TrainViewModel private constructor(
     }
 
     fun refreshGpsLocation() {
-        locationTracker.start()
+        locationTracker.acquire(GpsOwner.UI)
     }
 
     fun clearApproachingAlert() {
@@ -677,17 +727,19 @@ class TrainViewModel private constructor(
             isTriggered = false,
             remainingDistanceKm = 0.0f
         )
-        locationTracker.start()
+        locationTracker.acquire(GpsOwner.DESTINATION_ALARM)
         _userFeedbackMessage.value = "تم تفعيل منبه النزول لمحطة (${station.name}) - سنوقظك قبل ${alertDistanceKm} كم! ⏰"
     }
 
     fun dismissDestinationAlarm() {
         _destinationAlarm.value = _destinationAlarm.value.copy(isTriggered = false, isEnabled = false)
+        locationTracker.release(GpsOwner.DESTINATION_ALARM)
         _userFeedbackMessage.value = "تم إيقاف المنبه بنجاح. رحلة موفقة! 🚆"
     }
 
     fun cancelDestinationAlarm() {
         _destinationAlarm.value = DestinationAlarm(isEnabled = false)
+        locationTracker.release(GpsOwner.DESTINATION_ALARM)
         _userFeedbackMessage.value = "تم إلغاء منبه الوصول."
     }
 
@@ -749,48 +801,48 @@ class TrainViewModel private constructor(
     // ==========================================
     fun submitCrowdingReport(trainId: String, crowding: CrowdingLevel) {
         if (_selectedCrowdingReport.value == crowding) return
-        _selectedCrowdingReport.value = crowding
         submitEvidenceReport(
             trainId = trainId,
             reportType = "OTHER",
-            description = "إفادة مستخدم: ${crowding.titleAr}"
+            description = "إفادة مستخدم: ${crowding.titleAr}",
+            onSuccess = { _selectedCrowdingReport.value = crowding },
         )
     }
 
     fun submitDelayReport(trainId: String, delay: DelayLevel) {
         if (_selectedDelayReport.value == delay) return
-        _selectedDelayReport.value = delay
         submitEvidenceReport(
             trainId = trainId,
             reportType = "DELAYED",
-            description = "إفادة مستخدم: ${delay.titleAr}"
+            description = "إفادة مستخدم: ${delay.titleAr}",
+            onSuccess = { _selectedDelayReport.value = delay },
         )
     }
 
     fun submitCrowdingReport(crowding: CrowdingLevel) {
         if (_selectedCrowdingReport.value == crowding) return
-        _selectedCrowdingReport.value = crowding
         submitBoundEvidenceReport(
             reportType = "OTHER",
-            description = "إفادة مستخدم: ${crowding.titleAr}"
+            description = "إفادة مستخدم: ${crowding.titleAr}",
+            onSuccess = { _selectedCrowdingReport.value = crowding },
         )
     }
 
     fun submitDelayReport(delay: DelayLevel) {
         if (_selectedDelayReport.value == delay) return
-        _selectedDelayReport.value = delay
         submitBoundEvidenceReport(
             reportType = "DELAYED",
-            description = "إفادة مستخدم: ${delay.titleAr}"
+            description = "إفادة مستخدم: ${delay.titleAr}",
+            onSuccess = { _selectedDelayReport.value = delay },
         )
     }
 
-    private fun submitEvidenceReport(trainId: String, reportType: String, description: String) {
+    private fun submitEvidenceReport(trainId: String, reportType: String, description: String, onSuccess: () -> Unit) {
         val tripId = _activeTrains.value.firstOrNull { it.id == trainId }?.tripId
-        submitEvidenceReport(trainId, tripId, reportType, description)
+        submitEvidenceReport(trainId, tripId, reportType, description, onSuccess = onSuccess)
     }
 
-    private fun submitBoundEvidenceReport(reportType: String, description: String) {
+    private fun submitBoundEvidenceReport(reportType: String, description: String, onSuccess: () -> Unit) {
         val binding = _monitorBinding.value
         if (binding == null) {
             _userFeedbackMessage.value = "ابدأ بثًا حيًا قبل إرسال إفادة عن حالة القطار."
@@ -810,6 +862,7 @@ class TrainViewModel private constructor(
             reportType = reportType,
             description = description,
             sessionId = binding.sessionId,
+            onSuccess = onSuccess,
         )
     }
 
@@ -819,7 +872,9 @@ class TrainViewModel private constructor(
         reportType: String,
         description: String,
         sessionId: String? = null,
+        onSuccess: () -> Unit = {},
     ) {
+        if (!reportInFlight.compareAndSet(false, true)) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 liveTrainRepository.submitReport(
@@ -832,6 +887,7 @@ class TrainViewModel private constructor(
                         description = description
                     )
                 )
+                onSuccess()
                 refreshActiveSessionReports()
                 if (sessionId != null) {
                     persistReportSelection(sessionId)
@@ -847,6 +903,8 @@ class TrainViewModel private constructor(
                     error,
                 )
                 _userFeedbackMessage.value = "تعذر إرسال الإفادة الآن. تحقق من الاتصال وحاول مجددًا."
+            } finally {
+                reportInFlight.set(false)
             }
         }
     }
@@ -1003,62 +1061,54 @@ class TrainViewModel private constructor(
         localPrefs.edit().putString("favorites", json.toString()).apply()
     }
 
+    /**
+     * Never restarts GPS on its own: a running service is re-attached, a recent
+     * unfinished session is offered to the user, anything older is discarded.
+     */
     private suspend fun restoreActiveMonitorSession() {
         val saved = runCatching { monitorSessionStore.load() }.getOrNull() ?: return
-        PersistentAppLogger.write(
-            "SESSION_RESTORE_BEGIN sessionId=${saved.sessionId} lineId=${saved.lineId} direction=${saved.direction}"
+        val savedAtMs = runCatching { monitorSessionStore.savedAtMs() }.getOrNull() ?: 0L
+        val decision = SessionRestorePolicy.decide(
+            savedAtMs = savedAtMs,
+            nowMs = System.currentTimeMillis(),
+            serviceRunning = BroadcastStatusRepository.state.value.isActive,
         )
-        val verified = runCatching {
-            liveTrainRepository.resumeMonitorSession(
-                sessionId = saved.sessionId,
-                lineId = saved.lineId,
-                direction = saved.direction,
-                tripId = saved.tripId,
-                trainId = saved.trainId,
-            )
-        }
-        if (verified.isFailure) {
-            val error = verified.exceptionOrNull()
-            PersistentAppLogger.write(
-                "SESSION_RESTORE_FAILED detail=${error?.message ?: error?.javaClass?.simpleName ?: "unknown"}",
-                error,
-            )
-            if (error is HttpException && error.code() in setOf(404, 409)) {
-                monitorSessionStore.clear()
-                clearPersistedReportSelections()
+        PersistentAppLogger.write("SESSION_RESTORE_DECISION decision=$decision sessionId=${saved.sessionId}")
+        when (decision) {
+            RestoreDecision.ATTACH_TO_RUNNING -> withContext(Dispatchers.Main.immediate) {
+                _monitorBinding.value = saved
+                restorePersistedReportSelections(saved.sessionId)
+                refreshActiveSessionReports()
             }
+            RestoreDecision.ASK_USER -> _pendingRestore.value = saved
+            RestoreDecision.DISCARD -> discardSavedSession(saved.sessionId)
+        }
+    }
+
+    private suspend fun discardSavedSession(sessionId: String) {
+        if (BroadcastStatusRepository.state.value.isActive) {
+            withContext(Dispatchers.Main.immediate) { requestServiceStop(StopReason.USER) }
             return
         }
-        val session = verified.getOrThrow()
-        val valid = session.id == saved.sessionId &&
-            session.lineId == saved.lineId &&
-            session.direction == saved.direction.name &&
-            session.tripId == saved.tripId &&
-            session.trainId == saved.trainId &&
-            session.status in setOf("STARTING", "ACTIVE")
-        if (!valid) {
-            PersistentAppLogger.write("SESSION_RESTORE_REJECTED reason=binding_mismatch status=${session.status}")
-            monitorSessionStore.clear()
-            clearPersistedReportSelections()
+        runCatching { monitorSessionStore.clear() }
+        withContext(Dispatchers.Main.immediate) { clearPersistedReportSelections() }
+        runCatching { liveTrainRepository.endMonitorSession(sessionId) }
+    }
+
+    /** User answer to "resume your unfinished broadcast?". The service re-validates the session. */
+    fun answerPendingRestore(resume: Boolean) {
+        val saved = _pendingRestore.value ?: return
+        _pendingRestore.value = null
+        if (!resume) {
+            viewModelScope.launch(Dispatchers.IO) { discardSavedSession(saved.sessionId) }
             return
         }
-        withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
-            _monitorBinding.value = saved
-            restorePersistedReportSelections(saved.sessionId)
-            _isOnboardMode.value = true
-            _isOnboardActivationPending.value = false
-            _activeSessionReports.value = emptyList()
-            refreshActiveSessionReports()
-            startTrainTrackingService(
-                saved.sessionId,
-                saved.lineId,
-                saved.direction,
-                saved.tripId,
-                saved.trainId,
-            )
-            _userFeedbackMessage.value = "تم استرجاع جلسة بث الموقع النشطة."
+        _monitorBinding.value = saved
+        restorePersistedReportSelections(saved.sessionId)
+        BroadcastStatusRepository.update(BroadcastState.Starting)
+        if (!startTrainTrackingService(saved.sessionId, saved.lineId, saved.direction, saved.tripId, saved.trainId)) {
+            BroadcastStatusRepository.update(BroadcastState.Stopped(StopReason.ERROR))
         }
-        PersistentAppLogger.write("SESSION_RESTORE_SUCCESS sessionId=${saved.sessionId} status=${session.status}")
     }
 
     private fun restoreLocalState() {
@@ -1186,10 +1236,8 @@ class TrainViewModel private constructor(
                 }
             }
             decision.shouldStopBroadcast -> {
-                PersistentAppLogger.write("AUTO_STOP_BROADCAST reason=outside_corridor durationSeconds=30")
-                toggleOnboardMode(false)
-                _verificationStatus.value = VerificationStatus.WAITING_GPS
-                _userFeedbackMessage.value = "تم إيقاف بث الموقع تلقائيًا: ابتعد جهازك عن ممر السكة الحديدية."
+                // The service enforces the stop (it also runs with the app closed).
+                _verificationStatus.value = VerificationStatus.OUT_OF_CORRIDOR
             }
             _isOnboardMode.value -> {
                 _verificationStatus.value = VerificationStatus.OUT_OF_CORRIDOR
@@ -1200,69 +1248,12 @@ class TrainViewModel private constructor(
         }
     }
 
-    private fun sendObservationIfEligible(gps: LiveGpsData) {
-        val binding = _monitorBinding.value ?: return
-        if (_verificationStatus.value != VerificationStatus.ON_TRACK_VERIFIED &&
-            _verificationStatus.value != VerificationStatus.STATIONARY
-        ) return
-        val now = System.currentTimeMillis()
-        if (now - lastObservationSentAt < 10_000L) return
-        lastObservationSentAt = now
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                PersistentAppLogger.write(
-                    "OBSERVATION_SEND_BEGIN sessionId=${binding.sessionId} " +
-                        "accuracy=${gps.accuracyMeters} speedKmh=${gps.speedKmh} " +
-                        "lat=${gps.latitude} lon=${gps.longitude}"
-                )
-                val response = liveTrainRepository.submitObservation(
-                    ObservationRequest(
-                        sessionId = binding.sessionId,
-                        lineId = binding.lineId,
-                        direction = binding.direction.name,
-                        tripId = binding.tripId,
-                        trainId = binding.trainId,
-                        latitude = gps.latitude,
-                        longitude = gps.longitude,
-                        accuracy = gps.accuracyMeters,
-                        speed = gps.speedKmh / 3.6f,
-                        heading = null,
-                        timestamp = if (gps.timestamp > 0L) gps.timestamp else now
-                    )
-                )
-                val accepted = response["accepted"] == true
-                PersistentAppLogger.write(
-                    "OBSERVATION_RESPONSE accepted=$accepted " +
-                        "scope=${response["scope"] ?: "unknown"} " +
-                        "reason=${response["rejection_reason"] ?: response["reason"] ?: "none"} " +
-                        "observationId=${response["observation_id"] ?: "none"}"
-                )
-                if (!accepted) {
-                    throw IllegalStateException(
-                        "observation_not_accepted:" +
-                            (response["rejection_reason"] ?: response["reason"] ?: "unknown")
-                    )
-                }
-                _lastObservationAcceptedAt.value = now
-                PersistentAppLogger.write("OBSERVATION_SEND_SUCCESS sessionId=${binding.sessionId}")
-            }.onFailure {
-                PersistentAppLogger.write(
-                    "OBSERVATION_SEND_FAILED sessionId=${binding.sessionId} detail=${it.message ?: it.javaClass.simpleName}",
-                    it,
-                )
-                _userFeedbackMessage.value = if (it.message?.startsWith("observation_not_accepted") == true) {
-                    "رفض الخادم آخر ملاحظة GPS؛ ستتم إعادة المحاولة تلقائيًا."
-                } else {
-                    "تعذر إرسال آخر ملاحظة للمصدر الحي؛ ستستمر المحاولة تلقائياً."
-                }
-            }
-        }
-    }
-
     private fun startLiveRefresh() {
         liveRefreshJob?.cancel()
         liveRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
+                appVisible.first { it }
+                ensureServerAwake()
                 refreshLiveTrainsInternal()
                 delay(15_000L)
             }
@@ -1273,6 +1264,21 @@ class TrainViewModel private constructor(
         radarRefreshJob?.cancel()
         radarRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             refreshLiveTrainsInternal()
+        }
+    }
+
+    private suspend fun ensureServerAwake() {
+        if (serverWarmedUp || BuildConfig.USE_MOCK_LIVE_DATA) return
+        _serverWaking.value = true
+        try {
+            liveTrainRepository.wakeServer()
+            serverWarmedUp = true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // The refresh that follows reports the error to the user.
+        } finally {
+            _serverWaking.value = false
         }
     }
 
@@ -1301,9 +1307,7 @@ class TrainViewModel private constructor(
                     requestedStation
                 )
             }.filter { train ->
-                requestedDirection == TrainDirection.BOTH ||
-                    train.direction == null ||
-                    train.direction == requestedDirection
+                requestedDirection == TrainDirection.BOTH || train.direction == requestedDirection
             }
 
             if (!isCurrentRadarSelection(requestedLine.id, requestedStation.code, requestedDirection)) {
@@ -1333,6 +1337,8 @@ class TrainViewModel private constructor(
                 }
             }
             checkApproachingTrain()
+        } catch (error: CancellationException) {
+            throw error // a newer selection replaced this request; not a failure
         } catch (error: Exception) {
             PersistentAppLogger.write(
                 "RECEPTION_REFRESH_FAILED detail=${error.message ?: error.javaClass.simpleName}",
@@ -1385,6 +1391,22 @@ class TrainViewModel private constructor(
         }
     }
 
+    /**
+     * True only when the train's direction is known and its next stop has not yet
+     * passed the waiting station along that direction. Trains moving away, on the
+     * opposite track, or with unknown direction never trigger an approach alert.
+     */
+    private fun isHeadingToward(train: ActiveTrain, waitingStation: Station, line: SuburbLine): Boolean {
+        val direction = train.direction ?: return false
+        val next = train.nextStation ?: return false
+        val nextIndex = line.stations.indexOfFirst { it.code == next.code }
+        val waitIndex = line.stations.indexOfFirst { it.id == waitingStation.id }
+        if (nextIndex < 0 || waitIndex < 0) return false
+        val capitalAtEnd = line.stations.last().code in setOf("ALG", "AGH")
+        val increasing = (direction == TrainDirection.INBOUND) == capitalAtEnd
+        return if (increasing) nextIndex <= waitIndex else nextIndex >= waitIndex
+    }
+
     private fun checkApproachingTrain() {
         val waitingStation = _selectedStation.value
         val thresholdKm = _alertDistanceThresholdKm.value
@@ -1393,9 +1415,12 @@ class TrainViewModel private constructor(
             checkTrainArrival(train, waitingStation)
         }
 
+        val line = _selectedSuburb.value
         val approaching = _activeTrains.value.find { train ->
-            (train.distanceToWaitingStationKm?.let { it <= thresholdKm } == true) ||
-                (train.etaToWaitingStationMinutes?.let { it <= 3 } == true)
+            isHeadingToward(train, waitingStation, line) && (
+                (train.distanceToWaitingStationKm?.let { it <= thresholdKm } == true) ||
+                    (train.etaToWaitingStationMinutes?.let { it <= 3 } == true)
+                )
         }
 
         if (approaching != null) {
@@ -1426,9 +1451,8 @@ class TrainViewModel private constructor(
 
     override fun onCleared() {
         super.onCleared()
-        locationTracker.stop()
-        stopTrainTrackingService()
-        TrainNotificationHelper.clearOngoingNotification(app)
+        // A running broadcast and an armed alarm outlive the screen; only the UI hold ends here.
+        locationTracker.release(GpsOwner.UI)
         liveRefreshJob?.cancel()
         radarRefreshJob?.cancel()
     }

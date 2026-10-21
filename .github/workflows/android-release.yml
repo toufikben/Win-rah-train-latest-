@@ -2,8 +2,8 @@ name: Android Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version_name:
@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 30
     env:
       VERSION_CODE: ${{ github.run_number }}
-      VERSION_NAME: ${{ github.event.inputs.version_name || '1.0' }}
+      VERSION_NAME: ${{ github.event.inputs.version_name || github.ref_name }}
       # Real production API. Writes remain an explicit release opt-in.
       WINRAH_API_BASE_URL: https://train-api-uep7.onrender.com/
       WINRAH_API_ENVIRONMENT: production
@@ -36,15 +36,18 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v5
 
-      - name: Set up Java 17
+      - name: Set up Java 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The default list includes the removed 'tools' package and fails.
+          packages: platform-tools
 
       - name: Install Android SDK packages
         shell: bash
@@ -52,6 +55,16 @@ jobs:
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Unit tests and lint (release gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          keytool -genkeypair -keystore "$RUNNER_TEMP/debug.keystore" -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          DEBUG_KEYSTORE_PATH="$RUNNER_TEMP/debug.keystore" ./gradlew --no-daemon testDebugUnitTest lintDebug
 
       - name: Validate signing secrets
         shell: bash

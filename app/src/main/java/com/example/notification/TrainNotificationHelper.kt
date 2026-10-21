@@ -195,16 +195,60 @@ object TrainNotificationHelper {
         }
     }
 
-    fun buildOngoingTripNotification(context: Context, currentSpeedKmh: Float, nextStationName: String, isTunnel: Boolean): android.app.Notification {
+    fun buildOngoingTripNotification(
+        context: Context,
+        currentSpeedKmh: Float,
+        nextStationName: String,
+        isTunnel: Boolean,
+        stopIntent: PendingIntent? = null,
+    ): android.app.Notification {
         val statusText = if (isTunnel) "إشارة GPS ضعيفة؛ الموقع غير مؤكد" else "السرعة: ${currentSpeedKmh.toInt()} كم/سا"
-        return NotificationCompat.Builder(context, CHANNEL_ONGOING_TRIP)
+        val openApp = PendingIntent.getActivity(
+            context,
+            3,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val builder = NotificationCompat.Builder(context, CHANNEL_ONGOING_TRIP)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle("رحلة قطار نشطة • القادمة: $nextStationName")
+            .setContentTitle("تشارك موقعك الآن • القادمة: $nextStationName")
             .setContentText(statusText)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setContentIntent(openApp)
+        if (stopIntent != null) {
+            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف المشاركة", stopIntent)
+        }
+        return builder.build()
+    }
+
+    /** Ongoing notification of the location-sharing service, with a stop action. */
+    fun buildSharingNotification(context: Context, statusText: String, stopIntent: PendingIntent): android.app.Notification {
+        val openApp = PendingIntent.getActivity(
+            context,
+            3,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(context, CHANNEL_ONGOING_TRIP)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentTitle("تشارك موقعك من القطار")
+            .setContentText(statusText)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openApp)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف المشاركة", stopIntent)
             .build()
+    }
+
+    fun updateSharingNotification(context: Context, statusText: String, stopIntent: PendingIntent) {
+        postNotification(context, NOTIFICATION_ID_ONGOING, buildSharingNotification(context, statusText, stopIntent))
     }
 
     fun showOngoingTripNotification(context: Context, currentSpeedKmh: Float, nextStationName: String, isTunnel: Boolean) {

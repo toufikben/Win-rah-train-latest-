@@ -26,6 +26,11 @@ import kotlinx.coroutines.cancel
 
 /** Collects device location fixes. It never synthesizes coordinates or speed. */
 class LocationTracker(context: Context) {
+    private companion object {
+        /** No fix for this long means the signal is lost (tunnel, indoors), not that the train stopped. */
+        const val GPS_SILENCE_MS = 20_000L
+    }
+
     private val client: FusedLocationProviderClient =
         LocationServices.getFusedLocationProviderClient(context.applicationContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -51,7 +56,7 @@ class LocationTracker(context: Context) {
             val request = LocationRequest.Builder(
                 Priority.PRIORITY_HIGH_ACCURACY,
                 2_000L
-            ).setMinUpdateDistanceMeters(2f).build()
+            ).setMinUpdateDistanceMeters(0f).build() // a stopped train must still produce fixes
             // The caller may run on Dispatchers.IO; null looper is invalid there.
             // Use the main looper for the callback, while keeping the request lifecycle safe.
             client.requestLocationUpdates(request, callback, Looper.getMainLooper())
@@ -76,21 +81,27 @@ class LocationTracker(context: Context) {
             latitude = location.latitude,
             longitude = location.longitude,
             speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f,
-            accuracyMeters = if (location.hasAccuracy()) location.accuracy else 0f,
+            accuracyMeters = if (location.hasAccuracy()) location.accuracy else null,
             altitudeMeters = if (location.hasAltitude()) location.altitude else 0.0,
             timestamp = location.time,
             isGpsActive = true,
             isDeadReckoning = false,
-            deadReckoningDurationSec = 0
+            deadReckoningDurationSec = 0,
+            isMock = isMockLocation(location),
         )
     }
+
+    @Suppress("DEPRECATION")
+    private fun isMockLocation(location: Location): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) location.isMock
+        else location.isFromMockProvider
 
     private fun startWatchdog() {
         watchdogJob?.cancel()
         watchdogJob = scope.launch {
             while (isActive) {
                 delay(3_000L)
-                if (_isTracking.value && (lastFixAt == 0L || System.currentTimeMillis() - lastFixAt > 8_000L)) {
+                if (_isTracking.value && (lastFixAt == 0L || System.currentTimeMillis() - lastFixAt > GPS_SILENCE_MS)) {
                     _gpsData.value = _gpsData.value.copy(
                         isGpsActive = false,
                         isDeadReckoning = false,

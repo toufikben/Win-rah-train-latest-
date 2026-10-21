@@ -536,7 +536,7 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "إحصائيات ومحطات شبكة القطارات (SNTF)",
+                        text = "الدليل المحلي للخطوط والمحطات",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -582,41 +582,19 @@ fun SettingsScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "${TrainRepository.totalStationsCount}",
+                                text = "${TrainRepository.suburbLines.flatMap { it.stations }.map { it.code }.distinct().size}",
                                 style = MaterialTheme.typography.headlineMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF34D399)
                             )
                             Text(
-                                text = "محطة قطار موثقة",
+                                text = "محطة في الدليل",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF94A3B8)
                             )
                         }
                     }
 
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF1E293B)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "100%",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFBBF24)
-                            )
-                            Text(
-                                text = "تغطية جغرافية",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF94A3B8)
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -648,13 +626,13 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "معلومات المطور وصاحب التطبيق",
+                            text = "التواصل مع المطوّر",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
-                            text = "بيانات التواصل والحساب الرسمي",
+                            text = "للاقتراحات والإبلاغ عن المشاكل",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF94A3B8)
                         )
@@ -688,7 +666,7 @@ fun SettingsScreen(
                                     color = Color(0xFF94A3B8)
                                 )
                                 Text(
-                                    text = "www.toufik155@gmail.com",
+                                    text = "toufik.bendjeddah@gmail.com",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF38BDF8)
@@ -698,13 +676,13 @@ fun SettingsScreen(
                             IconButton(
                                 onClick = {
                                     val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                        data = Uri.parse("mailto:www.toufik155@gmail.com")
+                                        data = Uri.parse("mailto:toufik.bendjeddah@gmail.com")
                                         putExtra(Intent.EXTRA_SUBJECT, "تطبيق رادار وتتبع قطارات الجزائر")
                                     }
                                     try {
                                         context.startActivity(intent)
                                     } catch (_: Exception) {
-                                        Toast.makeText(context, "www.toufik155@gmail.com", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "toufik.bendjeddah@gmail.com", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             ) {
@@ -721,132 +699,40 @@ fun SettingsScreen(
                         Divider(color = Color(0xFF334155), thickness = 0.6.dp)
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // User Phone & WhatsApp Row
+                        // Anonymous device id: quoted in data access/deletion requests
+                        val deviceId = remember { viewModel.anonymousDeviceId() }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                Icons.Default.Smartphone,
-                                contentDescription = "رقم الهاتف والواتساب",
-                                tint = Color(0xFF34D399),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "الهاتف النقال والواتساب:",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color(0xFF94A3B8)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFF065F46)
-                                    ) {
-                                        Text(
-                                            text = "WhatsApp 💬",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFFD1FAE5),
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                        )
-                                    }
-                                }
                                 Text(
-                                    text = "0541558675 (+213 541 55 86 75)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF34D399)
+                                    text = "معرّف جهازك المجهول (لطلبات حذف البيانات):",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF94A3B8)
+                                )
+                                Text(
+                                    text = deviceId,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFCBD5E1)
                                 )
                             }
-
-                            // Copy Phone button
                             IconButton(
                                 onClick = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("Phone", "0541558675")
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "تم نسخ رقم الهاتف والواتساب: 0541558675", Toast.LENGTH_SHORT).show()
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("WinRah device id", deviceId))
+                                    Toast.makeText(context, "تم نسخ المعرّف", Toast.LENGTH_SHORT).show()
                                 }
                             ) {
                                 Icon(
                                     Icons.Default.ContentCopy,
-                                    contentDescription = "نسخ الرقم",
+                                    contentDescription = "نسخ المعرّف",
                                     tint = Color(0xFF94A3B8),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Quick Contact Action Buttons (Call, WhatsApp, Email)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Direct Phone Call
-                            Button(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_DIAL).apply {
-                                        data = Uri.parse("tel:0541558675")
-                                    }
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {}
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        Icons.Default.Call,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "اتصال 📞",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-
-                            // Direct WhatsApp Chat
-                            Button(
-                                onClick = {
-                                    val url = "https://wa.me/213541558675"
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {
-                                        Toast.makeText(context, "WhatsApp: 0541558675", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "واتساب 💬",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Divider(color = Color(0xFF334155), thickness = 0.6.dp)
                         Spacer(modifier = Modifier.height(12.dp))
 
                         // Free App & No Ads Banner + Contribution Welcome
@@ -861,7 +747,7 @@ fun SettingsScreen(
                                     Text(text = "🎁", fontSize = 16.sp)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "تطبيق مجاني 100% وخالٍ تماماً من الإعلانات",
+                                        text = "تطبيق مجاني وبلا إعلانات",
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF2DD4BF)
@@ -916,21 +802,9 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "الإصدار 2.4 - النسخة الخاصة المعتمدة",
+                                    text = "الإصدار ${BuildConfig.VERSION_NAME}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color(0xFFCBD5E1)
-                                )
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF065F46)
-                            ) {
-                                Text(
-                                    text = "مفعل وموثق",
-                                    color = Color(0xFFD1FAE5),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                 )
                             }
                         }

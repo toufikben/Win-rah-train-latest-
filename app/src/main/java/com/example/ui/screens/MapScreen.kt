@@ -603,7 +603,7 @@ fun MapScreen(viewModel: TrainViewModel) {
 
                                     var map = L.map('map', {
                                         zoomControl: false,
-                                        attributionControl: false
+                                        attributionControl: true
                                     }).setView([initialLat, initialLon], 14);
                                     setTimeout(function() { map.invalidateSize({ animate: false }); }, 250);
 
