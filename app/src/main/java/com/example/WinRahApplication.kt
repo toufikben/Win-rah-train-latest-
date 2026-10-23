@@ -1,7 +1,7 @@
 package com.example
 
 import android.app.Application
-import com.example.alerts.ApproachAlertService
+import com.example.alerts.AlertChannels
 import com.example.alerts.CommuteDelayWorker
 import com.example.data.local.PersistentAppLogger
 import kotlinx.coroutines.CoroutineScope
@@ -19,7 +19,7 @@ class WinRahApplication : Application() {
         super.onCreate()
         PersistentAppLogger.initialize(this)
         container = AppContainer(this)
-        ApproachAlertService.ensureChannels(this)
+        AlertChannels.ensure(this)
 
         // Keep the commute delay check in step with the commute and the supporter status.
         val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

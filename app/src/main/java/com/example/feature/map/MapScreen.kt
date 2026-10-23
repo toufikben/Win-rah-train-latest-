@@ -111,7 +111,10 @@ fun MapScreen(vm: MapViewModel, onOpenStation: (String) -> Unit) {
             if (mapRef.value == null) v.getMapAsync { map ->
                 map.cameraPosition = CameraPosition.Builder().target(LatLng(36.70, 3.10)).zoom(9.6).build()
                 map.uiSettings.isRotateGesturesEnabled = false
-                map.setStyle(Style.Builder().fromUri(if (dark) STYLE_DARK else STYLE_LIGHT)) { style -> setup(style) }
+                map.setStyle(Style.Builder().fromUri(if (dark) STYLE_DARK else STYLE_LIGHT)) { style ->
+                    setup(style)
+                    update(style, vm.state.value)
+                }
                 map.addOnMapClickListener { p ->
                     val pt = map.projection.toScreenLocation(p)
                     map.queryRenderedFeatures(pt, "wr-stations").firstOrNull()?.getStringProperty("id")?.let { onOpenStation(it); true } ?: false

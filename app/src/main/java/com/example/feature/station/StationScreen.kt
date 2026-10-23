@@ -68,6 +68,7 @@ data class StationState(
     val toSuburbs: List<TrainRow> = emptyList(),
     val loading: Boolean = true,
     val error: String? = null,
+    val favoriteMessage: String? = null,
 )
 
 class StationViewModel(app: Application) : AndroidViewModel(app) {
@@ -124,13 +125,35 @@ class StationViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleFavorite() = viewModelScope.launch {
         val id = stationId ?: return@launch
-        val favs = prefs.value.favoriteStationIds
-        c.prefs.setFavorites(if (id in favs) favs - id else (favs + id).take(prefs.value.maxFavorites))
+        val p = prefs.value
+        val favs = p.favoriteStationIds
+        when {
+            id in favs -> {
+                c.prefs.setFavorites(favs - id)
+                state.value = state.value.copy(favoriteMessage = null)
+            }
+            favs.size >= p.maxFavorites -> {
+                state.value = state.value.copy(favoriteMessage = "وصلت إلى حد المحطات المجانية. ادعم التطبيق لمحطات غير محدودة.")
+            }
+            else -> {
+                c.prefs.setFavorites(favs + id)
+                state.value = state.value.copy(favoriteMessage = null)
+            }
+        }
+    }
+
+    fun clearFavoriteMessage() {
+        state.value = state.value.copy(favoriteMessage = null)
     }
 }
 
 @Composable
-fun StationScreen(vm: StationViewModel, stationId: String, onOpenGuide: (String) -> Unit) {
+fun StationScreen(
+    vm: StationViewModel,
+    stationId: String,
+    onOpenGuide: (String) -> Unit,
+    onOpenSupport: () -> Unit,
+) {
     LaunchedEffect(stationId) { vm.open(stationId) }
     val s by vm.state.collectAsState()
     val p by vm.prefs.collectAsState()
@@ -148,6 +171,19 @@ fun StationScreen(vm: StationViewModel, stationId: String, onOpenGuide: (String)
         }
         FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             s.station?.lineCodes?.forEach { code -> LineChip(lineShortName(code), LineColors.forCode(code)) }
+        }
+        s.favoriteMessage?.let { message ->
+            Text(
+                message,
+                style = WrType.small,
+                color = c.estimatedText,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp)).background(c.signalSoft)
+                    .clickable {
+                        vm.clearFavoriteMessage()
+                        onOpenSupport()
+                    }.padding(12.dp),
+            )
         }
         Section("نحو الجزائر", s.toAlgiers, empty = "لا قطارات أخرى اليوم نحو الجزائر")
         Section("نحو الضواحي", s.toSuburbs, empty = "لا قطارات أخرى اليوم نحو الضواحي")

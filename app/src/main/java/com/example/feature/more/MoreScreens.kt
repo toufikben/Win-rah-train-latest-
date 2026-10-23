@@ -87,6 +87,8 @@ class MoreViewModel(app: Application) : AndroidViewModel(app) {
     val stations = c.network.stations
     val offers = c.billing.offers
     val billingMessage = c.billing.message
+    private val _commuteMessage = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val commuteMessage: StateFlow<String?> = _commuteMessage
 
     init { viewModelScope.launch { runCatching { c.network.loadReference() } } }
 
@@ -94,12 +96,16 @@ class MoreViewModel(app: Application) : AndroidViewModel(app) {
     fun buy(activity: Activity, offer: SupportOffer) = c.billing.buy(activity, offer)
     fun restore() = viewModelScope.launch { c.billing.restore() }
     fun clearBillingMessage() = c.billing.clearMessage()
+    fun clearCommuteMessage() { _commuteMessage.value = null }
 
     fun toggleFavorite(id: String) = viewModelScope.launch {
         val p = prefs.value
         val favs = p.favoriteStationIds
-        if (id in favs) c.prefs.setFavorites(favs - id)
-        else if (favs.size < p.maxFavorites) c.prefs.setFavorites(favs + id)
+        if (id in favs) {
+            c.prefs.setFavorites(favs - id)
+        } else if (favs.size < p.maxFavorites) {
+            c.prefs.setFavorites(favs + id)
+        }
     }
     fun setSound(id: String) = viewModelScope.launch { c.prefs.setSound(id) }
     fun setAlarmSound(id: String) = viewModelScope.launch { c.prefs.setAlarmSound(id) }
@@ -107,7 +113,21 @@ class MoreViewModel(app: Application) : AndroidViewModel(app) {
     fun setVibrate(v: Boolean) = viewModelScope.launch { c.prefs.setVibrate(v) }
     fun setLead(m: Int) = viewModelScope.launch { c.prefs.setAlert(prefs.value.alertStationId, m) }
     fun setTheme(t: String) = viewModelScope.launch { c.prefs.setTheme(t) }
-    fun setCommute(cm: Commute?) = viewModelScope.launch { c.prefs.setCommute(cm) }
+
+    fun setCommute(cm: Commute?) {
+        if (cm != null) {
+            if (cm.fromStationId.isBlank() || cm.toStationId.isBlank()) {
+                _commuteMessage.value = "اختر محطة البداية ومحطة الوصول أولًا."
+                return
+            }
+            if (cm.fromStationId == cm.toStationId) {
+                _commuteMessage.value = "يجب أن تكون محطة البداية مختلفة عن محطة الوصول."
+                return
+            }
+        }
+        _commuteMessage.value = null
+        viewModelScope.launch { c.prefs.setCommute(cm) }
+    }
     fun preview(type: TrainSoundType) = viewModelScope.launch { TrainSoundSynthesizer.playSound(type, prefs.value.soundVolume / 100f) }
 }
 
@@ -129,8 +149,15 @@ fun MoreScreen(vm: MoreViewModel, open: (String) -> Unit) {
         }
         WrCard {
             MoreRow(Icons.Rounded.Info, "كيف يعمل وين راح", "مباشر، تقديري، مجدول") { open("howto") }
-            MoreRow(Icons.Rounded.Favorite, "عن التطبيق والإهداء", "الإصدار ${BuildConfig.VERSION_NAME}") { open("about") }
-            MoreRow(Icons.Rounded.Tune, "التشخيص", "حالة الاتصال والموقع", last = true) { open("diagnostics") }
+            MoreRow(
+                Icons.Rounded.Favorite,
+                "عن التطبيق والإهداء",
+                "الإصدار ${BuildConfig.VERSION_NAME}",
+                last = !BuildConfig.DIAGNOSTICS_ENABLED,
+            ) { open("about") }
+            if (BuildConfig.DIAGNOSTICS_ENABLED) {
+                MoreRow(Icons.Rounded.Tune, "التشخيص", "حالة الاتصال والموقع", last = true) { open("diagnostics") }
+            }
         }
     }
 }
@@ -234,20 +261,46 @@ fun FavoritesScreen(vm: MoreViewModel, onOpenSupport: () -> Unit) {
 // ---------------------------------------------------------------- commute
 
 @Composable
-fun CommuteScreen(vm: MoreViewModel) {
+fun CommuteScreen(vm: MoreViewModel, onOpenSupport: () -> Unit) {
     val p by vm.prefs.collectAsState()
     val all by vm.stations.collectAsState()
+    val message by vm.commuteMessage.collectAsState()
     val c = Wr.colors
-    val cm = p.commute ?: Commute(p.favoriteStationIds.firstOrNull() ?: "", "", 7 * 60 + 30, 17 * 60)
     SubScreen("رحلتي اليومية") {
         Text("نعرض قطار الذهاب صباحًا وقطار العودة مساءً تلقائيًا، وننبهك إن تأخر.", style = WrType.body, color = c.inkMuted)
-        WrCard(padding = androidx.compose.foundation.layout.PaddingValues(14.dp)) {
-            StationPicker("من", cm.fromStationId, all) { vm.setCommute(cm.copy(fromStationId = it)) }
-            StationPicker("إلى", cm.toStationId, all) { vm.setCommute(cm.copy(toStationId = it)) }
-            TimeStepper("الذهاب", cm.outboundMinute) { vm.setCommute(cm.copy(outboundMinute = it)) }
-            TimeStepper("العودة", cm.returnMinute) { vm.setCommute(cm.copy(returnMinute = it)) }
+        if (!p.isSupporter) {
+            WrCard(padding = androidx.compose.foundation.layout.PaddingValues(14.dp)) {
+                Text("رحلتي اليومية ميزة للداعمين", style = WrType.bodyStrong, color = c.ink)
+                Text("الدعم يفعّل تنبيهات تأخر الذهاب والعودة. المعلومات الأساسية تبقى مجانية للجميع.", style = WrType.small, color = c.inkMuted)
+            }
+            PrimaryButton("ادعم لتفعيل رحلتي اليومية", onClick = onOpenSupport)
+            if (p.commute != null) {
+                SecondaryButton("إلغاء الرحلة اليومية", onClick = { vm.setCommute(null) }, color = c.danger)
+            }
+        } else {
+            var draft by remember(p.commute) {
+                mutableStateOf(p.commute ?: Commute("", "", 7 * 60 + 30, 17 * 60))
+            }
+            WrCard(padding = androidx.compose.foundation.layout.PaddingValues(14.dp)) {
+                StationPicker("من", draft.fromStationId, all) { draft = draft.copy(fromStationId = it) }
+                StationPicker("إلى", draft.toStationId, all) { draft = draft.copy(toStationId = it) }
+                TimeStepper("الذهاب", draft.outboundMinute) { draft = draft.copy(outboundMinute = it) }
+                TimeStepper("العودة", draft.returnMinute) { draft = draft.copy(returnMinute = it) }
+            }
+            message?.let {
+                Text(
+                    it,
+                    style = WrType.small,
+                    color = c.danger,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(c.signalSoft).clickable { vm.clearCommuteMessage() }.padding(12.dp),
+                )
+            }
+            PrimaryButton("حفظ الرحلة اليومية", onClick = { vm.setCommute(draft) })
+            if (p.commute != null) {
+                SecondaryButton("إلغاء الرحلة اليومية", onClick = { vm.setCommute(null) }, color = c.danger)
+            }
         }
-        if (p.commute != null) SecondaryButton("إلغاء الرحلة اليومية", onClick = { vm.setCommute(null) }, color = c.danger)
     }
 }
 

@@ -1,10 +1,16 @@
 package com.example.feature.home
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.WinRahApplication
 import com.example.alerts.ApproachAlertService
+import com.example.data.CommuteLeg
+import com.example.data.CommuteWindow
 import com.example.data.Line
 import com.example.data.Station
 import com.example.data.prefs.Prefs
@@ -62,6 +68,7 @@ data class HomeState(
     val next: List<TrainRow> = emptyList(),
     val nearest: Pair<Station, Double>? = null,
     val alertOn: Boolean = false,
+    val alertMessage: String? = null,
 )
 
 /** Algeria is UTC+1 all year. */
@@ -97,13 +104,33 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleAlert() = viewModelScope.launch {
         val p = prefs.value
-        val st = _state.value.station ?: return@launch
+        val st = _state.value.station
+        if (st == null) {
+            _state.value = _state.value.copy(alertMessage = "اختر محطة أولًا لتفعيل تنبيه الاقتراب.")
+            return@launch
+        }
         val on = p.alertStationId != st.id
+        if (on && !canPostNotifications()) {
+            _state.value = _state.value.copy(alertMessage = "فعّل إشعارات التطبيق أولًا؛ التنبيه لا يعمل بدونها.")
+            return@launch
+        }
         c.prefs.setAlert(if (on) st.id else null, p.alertLeadMinutes)
         // The alert must survive the app being closed, so a foreground service follows the train.
         val ctx = getApplication<Application>()
-        if (on) ApproachAlertService.start(ctx, ApproachAlertService.MODE_WAITING, st.id) else ApproachAlertService.stop(ctx)
+        if (on) ApproachAlertService.start(ctx, st.id) else ApproachAlertService.stop(ctx)
+        _state.value = _state.value.copy(alertMessage = null)
     }
+
+    fun clearAlertMessage() {
+        _state.value = _state.value.copy(alertMessage = null)
+    }
+
+    private fun canPostNotifications(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(
+                getApplication(),
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
 
     fun setNearest(lat: Double, lon: Double) {
         _state.value = _state.value.copy(nearest = c.network.nearest(lat, lon, 1).firstOrNull())
@@ -128,30 +155,25 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private fun nowMinute(): Int = LocalTime.now(ALGERIA).let { it.hour * 60 + it.minute }
 
     /** Commute window: an hour and a half around each commute time picks the view. */
-    private fun commuteLeg(p: Prefs): Pair<String, String>? {
-        val cm = p.commute ?: return null
-        val now = nowMinute()
-        return when {
-            now in (cm.outboundMinute - 90)..(cm.outboundMinute + 120) -> cm.fromStationId to cm.toStationId
-            now in (cm.returnMinute - 90)..(cm.returnMinute + 180) -> cm.toStationId to cm.fromStationId
-            else -> null
-        }
+    private fun commuteLeg(p: Prefs): CommuteLeg? {
+        val commute = p.commute ?: return null
+        return CommuteWindow.legNow(commute, nowMinute())
     }
 
     private fun chooseStation(p: Prefs): String? =
-        manualStationId ?: commuteLeg(p)?.first ?: p.favoriteStationIds.firstOrNull() ?: p.commute?.fromStationId
+        manualStationId ?: commuteLeg(p)?.fromStationId ?: p.favoriteStationIds.firstOrNull() ?: p.commute?.fromStationId
 
     private fun recompute() {
         val p = prefs.value
         val lines = c.network.lines.value
         val stationId = chooseStation(p)
         val station = c.network.station(stationId)
-        val leg = commuteLeg(p)?.takeIf { manualStationId == null || manualStationId == it.first }
-        val legHeading = leg?.let { headingBetween(lines, it.first, it.second) }
+        val leg = commuteLeg(p)?.takeIf { manualStationId == null || manualStationId == it.fromStationId }
+        val legHeading = leg?.let { headingBetween(lines, it.fromStationId, it.toStationId) }
         val heading = manualHeading ?: legHeading ?: _state.value.heading
         val rows = lastDepartures.map { it.toRow(lines) }
             .filter { it.heading == heading }
-            .filter { row -> leg == null || reaches(lines, row.lineCode, leg.second) }
+            .filter { row -> leg == null || reaches(lines, row.lineCode, leg.toStationId) }
         val hero = rows.firstOrNull()?.let { heroFor(it, lines, station) }
         _state.value = _state.value.copy(
             station = station,
@@ -159,7 +181,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             heading = heading,
             commuteMode = when {
                 leg == null -> null
-                leg.first == p.commute?.fromStationId -> "ذهاب"
+                leg.fromStationId == p.commute?.fromStationId -> "ذهاب"
                 else -> "عودة"
             },
             hero = hero,
@@ -201,7 +223,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val truth = when (truth) { "live" -> Truth.LIVE; "estimated" -> Truth.ESTIMATED; else -> Truth.SCHEDULED }
         val delay = eta?.let { e ->
             val expected = nowMinute() + e.min
-            (expected - scheduledMinute).takeIf { it in -5..120 }
+            CommuteWindow.circularDelayMinutes(expected, scheduledMinute).takeIf { it in -5..120 }
         }
         val note = when {
             express -> "سريع: لا يقف في $skipsCount محطات"

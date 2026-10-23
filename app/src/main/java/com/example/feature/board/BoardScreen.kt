@@ -3,6 +3,8 @@ package com.example.feature.board
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,13 +24,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,7 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.WinRahApplication
-import com.example.alerts.ApproachAlertService
+import com.example.alerts.WakeAlarmService
+import com.example.data.prefs.Prefs
 import com.example.design.LiveDot
 import com.example.design.PrimaryButton
 import com.example.design.SecondaryButton
@@ -51,6 +57,7 @@ import com.example.design.WrType
 import com.example.location.BroadcastState
 import com.example.model.TrainDirection
 import com.example.viewmodel.TrainViewModel
+import kotlinx.coroutines.launch
 
 /**
  * "I'm on the train": the rider picks only the line and direction (riders don't know train
@@ -67,18 +74,57 @@ fun BoardScreen(vm: TrainViewModel) {
     val pending by vm.isOnboardActivationPending.collectAsState()
     val state by vm.broadcastState.collectAsState()
     val feedback by vm.userFeedbackMessage.collectAsState()
-    val network = remember { (context.applicationContext as WinRahApplication).container.network }
-    val stations by network.stations.collectAsState()
-    var wakeAt by rememberSaveable { mutableStateOf<String?>(null) }
+    val container = remember { (context.applicationContext as WinRahApplication).container }
+    val stations by container.network.stations.collectAsState()
+    val prefs by container.prefs.prefs.collectAsState(initial = Prefs())
+    val wakeAt = prefs.wakeStationId
+    val scope = rememberCoroutineScope()
     var pickWake by remember { mutableStateOf(false) }
+    var pendingAction by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingWakeStation by rememberSaveable { mutableStateOf<String?>(null) }
+    var permissionMessage by rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun canNotify(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    fun armWake(stationId: String) {
+        if (!canNotify()) {
+            permissionMessage = "الإشعارات مطفأة، لذلك لن يظهر المنبّه. فعّل الإشعارات من إعدادات التطبيق."
+            return
+        }
+        scope.launch { container.prefs.setWakeStation(stationId) }
+        WakeAlarmService.start(context, stationId)
+    }
 
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
-        if (r[Manifest.permission.ACCESS_FINE_LOCATION] == true) vm.toggleOnboardMode(true)
+        val fine = r[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val action = pendingAction
+        val station = pendingWakeStation
+        pendingAction = null
+        pendingWakeStation = null
+        if (!fine) {
+            permissionMessage = "نحتاج الموقع أثناء استخدام التطبيق لتشغيل المشاركة أو منبّه النزول."
+            return@rememberLauncherForActivityResult
+        }
+        when (action) {
+            "broadcast" -> vm.toggleOnboardMode(true)
+            "wake" -> station?.let(::armWake)
+        }
     }
+
     fun start() {
-        val ok = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (ok) vm.toggleOnboardMode(true)
-        else permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        if (!canNotify()) {
+            permissionMessage = "الإشعارات مطفأة، لذلك لن ترى حالة المشاركة. فعّل الإشعارات من إعدادات التطبيق."
+            return
+        }
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fine) {
+            vm.toggleOnboardMode(true)
+        } else {
+            pendingAction = "broadcast"
+            permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
     }
 
     Column(Modifier.fillMaxSize().background(c.ground).verticalScroll(rememberScrollState()).padding(20.dp),
@@ -87,7 +133,7 @@ fun BoardScreen(vm: TrainViewModel) {
 
         if (onboard || pending) {
             SharingCard(state, line.name, direction)
-            SecondaryButton("نزلت من القطار", onClick = { vm.toggleOnboardMode(false); ApproachAlertService.stop(context) }, color = c.danger)
+            SecondaryButton("نزلت من القطار", onClick = { vm.toggleOnboardMode(false) }, color = c.danger)
         } else {
             Text("اختر الخط والاتجاه فقط. نتعرّف على القطار تلقائيًا من موقعه.", style = WrType.body, color = c.inkMuted)
             Text("الخط", style = WrType.section.copy(color = c.inkMuted))
@@ -119,17 +165,25 @@ fun BoardScreen(vm: TrainViewModel) {
                 if (wakeAt == null) {
                     SecondaryButton("اختر محطة النزول", onClick = { pickWake = !pickWake })
                 } else {
-                    SecondaryButton("إلغاء المنبّه", onClick = { wakeAt = null; ApproachAlertService.stop(context) }, color = c.danger)
+                    SecondaryButton("إلغاء المنبّه", onClick = {
+                        scope.launch { container.prefs.setWakeStation(null) }
+                        WakeAlarmService.stop(context)
+                    }, color = c.danger)
                 }
             }
             if (pickWake) {
                 Column(Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.cardMuted)) {
                     stations.sortedBy { it.nameAr }.forEach { st ->
                         Text(st.nameAr, style = WrType.body, color = c.ink, modifier = Modifier.fillMaxWidth().clickable {
-                            wakeAt = st.id; pickWake = false
-                            val ok = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                            if (ok) ApproachAlertService.start(context, ApproachAlertService.MODE_ONBOARD, st.id)
-                            else permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+                            pickWake = false
+                            val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                            if (fine) {
+                                armWake(st.id)
+                            } else {
+                                pendingAction = "wake"
+                                pendingWakeStation = st.id
+                                permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                            }
                         }.padding(horizontal = 14.dp, vertical = 10.dp))
                     }
                 }
@@ -138,6 +192,30 @@ fun BoardScreen(vm: TrainViewModel) {
 
         BatteryHint()
         feedback?.let { Text(it, style = WrType.small, color = c.estimatedText) }
+    }
+
+    permissionMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { permissionMessage = null },
+            title = { Text("صلاحية مطلوبة") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = {
+                    permissionMessage = null
+                    runCatching {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:${context.packageName}"),
+                            ),
+                        )
+                    }
+                }) { Text("فتح الإعدادات") }
+            },
+            dismissButton = {
+                TextButton(onClick = { permissionMessage = null }) { Text("لاحقًا") }
+            },
+        )
     }
 }
 

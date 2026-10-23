@@ -26,13 +26,13 @@ data class Prefs(
     val favoriteStationIds: List<String> = emptyList(),
     val commute: Commute? = null,
     val alertStationId: String? = null,
+    val wakeStationId: String? = null,
     val alertLeadMinutes: Int = 5,
     val soundId: String = "electric",
     val alarmSoundId: String = "steam",
     val soundVolume: Int = 80,
     val vibrate: Boolean = true,
     val theme: String = "system",       // system | light | dark
-    val language: String = "ar",        // ar | fr | en
     val supporterUntilMs: Long = 0L,    // entitlement cache; Play Billing is the truth
     val lifetimeSupporter: Boolean = false,
 ) {
@@ -53,13 +53,13 @@ class UserPrefsRepository(private val context: Context) {
         val commuteOut = intPreferencesKey("commute_out_min")
         val commuteBack = intPreferencesKey("commute_back_min")
         val alertStation = stringPreferencesKey("alert_station")
+        val wakeStation = stringPreferencesKey("wake_station")
         val alertLead = intPreferencesKey("alert_lead_min")
         val sound = stringPreferencesKey("sound_id")
         val alarmSound = stringPreferencesKey("alarm_sound_id")
         val volume = intPreferencesKey("sound_volume")
         val vibrate = booleanPreferencesKey("vibrate")
         val theme = stringPreferencesKey("theme")
-        val language = stringPreferencesKey("language")
         val supporterUntil = stringPreferencesKey("supporter_until_ms")
         val lifetime = booleanPreferencesKey("lifetime_supporter")
     }
@@ -74,13 +74,13 @@ class UserPrefsRepository(private val context: Context) {
                 Commute(from, to, p[K.commuteOut] ?: 420, p[K.commuteBack] ?: 1020)
             } else null,
             alertStationId = p[K.alertStation],
+            wakeStationId = p[K.wakeStation],
             alertLeadMinutes = p[K.alertLead] ?: 5,
             soundId = p[K.sound] ?: "electric",
             alarmSoundId = p[K.alarmSound] ?: "steam",
             soundVolume = p[K.volume] ?: 80,
             vibrate = p[K.vibrate] ?: true,
             theme = p[K.theme] ?: "system",
-            language = p[K.language] ?: "ar",
             supporterUntilMs = p[K.supporterUntil]?.toLongOrNull() ?: 0L,
             lifetimeSupporter = p[K.lifetime] ?: false,
         )
@@ -104,12 +104,15 @@ class UserPrefsRepository(private val context: Context) {
         it[K.alertLead] = leadMinutes
     }
 
+    suspend fun setWakeStation(stationId: String?) = context.store.edit {
+        if (stationId == null) it.remove(K.wakeStation) else it[K.wakeStation] = stationId
+    }
+
     suspend fun setSound(id: String) = context.store.edit { it[K.sound] = id }
     suspend fun setAlarmSound(id: String) = context.store.edit { it[K.alarmSound] = id }
     suspend fun setVolume(v: Int) = context.store.edit { it[K.volume] = v.coerceIn(0, 100) }
     suspend fun setVibrate(v: Boolean) = context.store.edit { it[K.vibrate] = v }
     suspend fun setTheme(t: String) = context.store.edit { it[K.theme] = t }
-    suspend fun setLanguage(l: String) = context.store.edit { it[K.language] = l }
 
     suspend fun setEntitlement(untilMs: Long, lifetime: Boolean) = context.store.edit {
         it[K.supporterUntil] = untilMs.toString(); it[K.lifetime] = lifetime

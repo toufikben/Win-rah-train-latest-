@@ -1,9 +1,11 @@
 package com.example.viewmodel
 
+import android.Manifest
 import android.app.Application
 import dz.winrah.trainradar.BuildConfig
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -59,6 +61,8 @@ import com.example.utils.GeoUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -271,6 +275,8 @@ class TrainViewModel private constructor(
 
     private var liveRefreshJob: Job? = null
     private var radarRefreshJob: Job? = null
+    private var activationJob: Job? = null
+    private var activationGeneration = 0
     private val radarRefreshMutex = Mutex()
     private val _monitorBinding = MutableStateFlow<MonitorBinding?>(null)
     val monitorBinding: StateFlow<MonitorBinding?> = _monitorBinding.asStateFlow()
@@ -281,6 +287,12 @@ class TrainViewModel private constructor(
 
     init {
         restoreLocalState()
+        if (_broadcastSelection.value == null) {
+            _broadcastSelection.value = BroadcastSelection(
+                lineId = _broadcastLine.value.id,
+                direction = _broadcastDirection.value,
+            )
+        }
 
         viewModelScope.launch {
             var initial = true
@@ -449,7 +461,10 @@ class TrainViewModel private constructor(
     }
 
     fun clearBroadcastSelection() {
-        _broadcastSelection.value = null
+        _broadcastSelection.value = BroadcastSelection(
+            lineId = _broadcastLine.value.id,
+            direction = _broadcastDirection.value,
+        )
     }
 
     fun setDirectionFilter(direction: TrainDirection) {
@@ -459,6 +474,9 @@ class TrainViewModel private constructor(
 
     fun toggleOnboardMode(enable: Boolean, reason: StopReason = StopReason.USER): Boolean {
         if (!enable) {
+            activationGeneration++
+            activationJob?.cancel()
+            activationJob = null
             _monitorBinding.value = null
             _activeSessionReports.value = emptyList()
             clearPersistedReportSelections()
@@ -471,17 +489,26 @@ class TrainViewModel private constructor(
         }
 
         if (_isOnboardActivationPending.value) return true
-        _isOnboardActivationPending.value = true
+        if (!canPostNotifications()) {
+            _userFeedbackMessage.value = "فعّل إشعارات التطبيق أولًا؛ إشعار المشاركة ضروري أثناء البث."
+            return false
+        }
         if (!enableLivePolling) {
             _isOnboardActivationPending.value = false
             _userFeedbackMessage.value = "وضع الاختبار المحلي لا يشغّل البث الشبكي."
             return false
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        activationJob?.cancel()
+        val generation = ++activationGeneration
+        _isOnboardActivationPending.value = true
+        activationJob = viewModelScope.launch(Dispatchers.IO) {
             var createdSessionId: String? = null
+            var serviceStarted = false
             try {
                 val selection = _broadcastSelection.value
-                    ?: throw IllegalStateException("broadcast_selection_required")
+                    ?: BroadcastSelection(_broadcastLine.value.id, _broadcastDirection.value).also {
+                        _broadcastSelection.value = it
+                    }
                 val requestedTripId = selection.tripId
                 val requestedTrainId = selection.trainId
                 PersistentAppLogger.write(
@@ -528,6 +555,8 @@ class TrainViewModel private constructor(
                         )
                     }
                 }
+                coroutineContext.ensureActive()
+                if (generation != activationGeneration) return@launch
                 val firstGps = locationTracker.gpsData.value
                 val firstCorridorDistance = GeoUtils.findClosestRailwaySegmentDistanceMeters(
                     firstGps.latitude,
@@ -564,13 +593,40 @@ class TrainViewModel private constructor(
                     session.trainId,
                 )
                 if (!started) throw IllegalStateException("service_start_failed")
+                serviceStarted = true
+                if (generation != activationGeneration) {
+                    runCatching { app.stopService(Intent(app, TrainTrackingService::class.java)) }
+                    withContext(NonCancellable) {
+                        runCatching { liveTrainRepository.endMonitorSession(createdSessionId) }
+                    }
+                    locationTracker.release(GpsOwner.UI)
+                    return@launch
+                }
                 locationTracker.release(GpsOwner.UI)
                 _isOnboardActivationPending.value = false
                 _userFeedbackMessage.value = "بدأت مشاركة موقعك. يمكنك إيقافها من هنا أو من الإشعار."
+            } catch (error: CancellationException) {
+                if (serviceStarted) {
+                    runCatching { app.stopService(Intent(app, TrainTrackingService::class.java)) }
+                }
+                if (createdSessionId != null) {
+                    withContext(NonCancellable) {
+                        runCatching { liveTrainRepository.endMonitorSession(createdSessionId) }
+                    }
+                }
+                if (generation == activationGeneration) {
+                    _monitorBinding.value = null
+                    _activeSessionReports.value = emptyList()
+                    clearPersistedReportSelections()
+                    _isOnboardActivationPending.value = false
+                    locationTracker.release(GpsOwner.UI)
+                }
+                throw error
             } catch (error: Exception) {
                 if (createdSessionId != null) {
                     runCatching { liveTrainRepository.endMonitorSession(createdSessionId) }
                 }
+                if (generation != activationGeneration) return@launch
                 _monitorBinding.value = null
                 _activeSessionReports.value = emptyList()
                 clearPersistedReportSelections()
@@ -608,6 +664,10 @@ class TrainViewModel private constructor(
         }
         return true
     }
+
+    private fun canPostNotifications(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this.app, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     private fun describeSessionFailure(error: Throwable): String {
         return when (error) {

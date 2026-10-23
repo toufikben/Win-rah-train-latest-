@@ -16,10 +16,10 @@ class Phase2LogicTest {
 
     @Test
     fun delayCheckRunsOnlyAroundCommuteTimes() {
-        assertEquals("from", CommuteDelayWorker.legNow(commute, 6 * 60 + 50))   // 40 min before
-        assertEquals("from", CommuteDelayWorker.legNow(commute, 7 * 60 + 40))   // 10 min after
+        assertEquals("from", CommuteDelayWorker.legNow(commute, 6 * 60 + 50)?.fromStationId)   // 40 min before
+        assertEquals("from", CommuteDelayWorker.legNow(commute, 7 * 60 + 40)?.fromStationId)   // 10 min after
         assertNull(CommuteDelayWorker.legNow(commute, 7 * 60 + 41))
-        assertEquals("to", CommuteDelayWorker.legNow(commute, 16 * 60 + 30))
+        assertEquals("to", CommuteDelayWorker.legNow(commute, 16 * 60 + 30)?.fromStationId)
         assertNull(CommuteDelayWorker.legNow(commute, 12 * 60))
     }
 

@@ -161,13 +161,20 @@ fun AppShell(prefs: Prefs, trainVm: TrainViewModel) {
                 composable("map") { MapScreen(viewModel<MapViewModel>(), onOpenStation = { nav.navigate("station/$it") }) }
                 composable("station/{id}") { e ->
                     val id = e.arguments?.getString("id") ?: return@composable
-                    Safe { StationScreen(viewModel<StationViewModel>(), id, onOpenGuide = { nav.navigate("guide/$it") }) }
+                    Safe {
+                        StationScreen(
+                            viewModel<StationViewModel>(),
+                            id,
+                            onOpenGuide = { nav.navigate("guide/$it") },
+                            onOpenSupport = { nav.navigate("support") },
+                        )
+                    }
                 }
                 composable("guide/{id}") { e -> Safe { GuideScreen(container.network.station(e.arguments?.getString("id"))) } }
                 composable("board") { Safe { BoardScreen(trainVm) } }
                 composable("more") { Safe { MoreScreen(more, open = { nav.navigate(it) }) } }
                 composable("favorites") { Safe { FavoritesScreen(more, onOpenSupport = { nav.navigate("support") }) } }
-                composable("commute") { Safe { CommuteScreen(more) } }
+                composable("commute") { Safe { CommuteScreen(more, onOpenSupport = { nav.navigate("support") }) } }
                 composable("sounds") { Safe { SoundsScreen(more) } }
                 composable("appearance") { Safe { AppearanceScreen(more) } }
                 composable("support") { Safe { SupportScreen(more) } }

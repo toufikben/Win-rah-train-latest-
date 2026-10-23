@@ -124,12 +124,31 @@ class SupportBilling(context: Context, private val prefs: UserPrefsRepository) :
         }
     }
 
-    /** Re-reads owned purchases (also the "restore" button). */
+    /** Re-reads owned purchases (also the "restore" button) and drops expired cached access. */
     suspend fun restore() {
         if (!connect()) return
+        var subscriptionsQueried = false
+        var lifetimeQueried = false
+        var hasSubscription = false
+        var hasLifetime = false
         for (type in listOf(BillingClient.ProductType.SUBS, BillingClient.ProductType.INAPP)) {
             val r = client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(type).build())
-            if (r.billingResult.responseCode == BillingClient.BillingResponseCode.OK) r.purchasesList.forEach { handle(it) }
+            if (r.billingResult.responseCode != BillingClient.BillingResponseCode.OK) continue
+            if (type == BillingClient.ProductType.SUBS) subscriptionsQueried = true else lifetimeQueried = true
+            r.purchasesList.forEach { purchase ->
+                if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                    if (SUBSCRIPTION_ID in purchase.products) hasSubscription = true
+                    if (LIFETIME_ID in purchase.products) hasLifetime = true
+                }
+                handle(purchase)
+            }
+        }
+        val current = prefs.prefs.first()
+        if (subscriptionsQueried && !hasSubscription && current.supporterUntilMs > 0L) {
+            prefs.setEntitlement(0L, current.lifetimeSupporter)
+        }
+        if (lifetimeQueried && !hasLifetime && current.lifetimeSupporter) {
+            prefs.setEntitlement(0L, false)
         }
     }
 

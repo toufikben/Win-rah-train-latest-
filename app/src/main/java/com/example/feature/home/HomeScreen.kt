@@ -88,6 +88,9 @@ fun HomeScreen(
             s.error?.let {
                 Text(it, style = WrType.small, color = c.danger, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             }
+            s.alertMessage?.let {
+                Text(it, style = WrType.small, color = c.estimatedText, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            }
             s.nearest?.let { (st, d) ->
                 WrCard(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp)) {
                     ListRow(divider = false, onClick = { onOpenStation(st.id) }) {

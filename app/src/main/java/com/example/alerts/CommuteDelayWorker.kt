@@ -15,6 +15,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.WinRahApplication
+import com.example.data.CommuteLeg
+import com.example.data.CommuteWindow
 import com.example.data.prefs.Commute
 import dz.winrah.trainradar.R
 import kotlinx.coroutines.flow.first
@@ -31,7 +33,7 @@ class CommuteDelayWorker(context: Context, params: WorkerParameters) : Coroutine
     companion object {
         private const val NAME = "commute-delay"
         private const val NOTIF_DELAY = 2003
-        private const val CHANNEL = ApproachAlertService.CHANNEL_LIVE
+        private const val CHANNEL = AlertChannels.LIVE
         const val DELAY_THRESHOLD_MIN = 5
 
         /** Schedules or cancels the check to match the current commute and supporter state. */
@@ -44,10 +46,12 @@ class CommuteDelayWorker(context: Context, params: WorkerParameters) : Coroutine
             wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.KEEP, req)
         }
 
-        /** Which station to check now, or null outside the windows (40 min before to 10 min after). */
-        fun legNow(c: Commute, nowMinute: Int): String? = when {
-            nowMinute in (c.outboundMinute - 40)..(c.outboundMinute + 10) -> c.fromStationId
-            nowMinute in (c.returnMinute - 40)..(c.returnMinute + 10) -> c.toStationId
+        /** Which leg to check now, or null outside the windows (40 min before to 10 min after). */
+        fun legNow(c: Commute, nowMinute: Int): CommuteLeg? = when {
+            CommuteWindow.isWithin(nowMinute, c.outboundMinute, 40, 10) ->
+                CommuteLeg(c.fromStationId, c.toStationId)
+            CommuteWindow.isWithin(nowMinute, c.returnMinute, 40, 10) ->
+                CommuteLeg(c.toStationId, c.fromStationId)
             else -> null
         }
     }
@@ -58,16 +62,20 @@ class CommuteDelayWorker(context: Context, params: WorkerParameters) : Coroutine
         val cm = p.commute ?: return Result.success()
         if (!p.isSupporter) return Result.success()
         val now = LocalTime.now(ZoneOffset.ofHours(1)).let { it.hour * 60 + it.minute }
-        val stationId = legNow(cm, now) ?: return Result.success()
-        val otherEnd = if (stationId == cm.fromStationId) cm.toStationId else cm.fromStationId
+        val leg = legNow(cm, now) ?: return Result.success()
+        val stationId = leg.fromStationId
+        val otherEnd = leg.toStationId
         return try {
             container.network.loadReference()
             val lines = container.network.lines.value
+            val expected = CommuteWindow.expectedDirection(lines, stationId, otherEnd)
             val next = container.network.departures(stationId, 8).firstOrNull { d ->
-                lines.firstOrNull { it.id == d.lineId }?.stations?.any { it.id == otherEnd && it.served } ?: true
+                val serves = lines.firstOrNull { it.id == d.lineId }
+                    ?.stations?.any { it.id == otherEnd && it.served } ?: false
+                serves && (expected == null || d.direction.equals(expected, ignoreCase = true))
             } ?: return Result.success()
             val eta = next.eta?.min ?: return Result.success()
-            val late = now + eta - next.scheduledMinute
+            val late = CommuteWindow.circularDelayMinutes(now + eta, next.scheduledMinute)
             val key = "${next.tripId}@${java.time.LocalDate.now()}"
             val prefs = applicationContext.getSharedPreferences("commute_delay", Context.MODE_PRIVATE)
             if (late >= DELAY_THRESHOLD_MIN && prefs.getString("last", null) != key) {
@@ -84,7 +92,7 @@ class CommuteDelayWorker(context: Context, params: WorkerParameters) : Coroutine
     private fun notify(title: String, text: String) {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(applicationContext,
                 Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        ApproachAlertService.ensureChannels(applicationContext)
+        AlertChannels.ensure(applicationContext)
         NotificationManagerCompat.from(applicationContext).notify(NOTIF_DELAY,
             NotificationCompat.Builder(applicationContext, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_train)

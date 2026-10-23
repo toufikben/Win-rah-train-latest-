@@ -105,7 +105,8 @@ class WakeAlarmActivity : ComponentActivity() {
                     PrimaryButton("أنا مستيقظ", onClick = {
                         ringing.cancel()
                         vibrator().cancel()
-                        getSystemService(NotificationManager::class.java).cancel(ApproachAlertService.NOTIF_ALARM)
+                        getSystemService(NotificationManager::class.java).cancel(WakeAlarmService.NOTIF_ALARM)
+                        WakeAlarmService.stop(this@WakeAlarmActivity)
                         finish()
                     })
                 }

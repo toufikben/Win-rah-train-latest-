@@ -206,7 +206,12 @@ class TrainTrackingService : Service() {
                 } catch (error: HttpException) {
                     log("OBSERVATION_HTTP_${error.code()}", error)
                     when (error.code()) {
-                        404, 409 -> finish(StopReason.SESSION_INVALID, clearSession = true)
+                        404, 409 -> finish(
+                            StopReason.SESSION_INVALID,
+                            clearSession = true,
+                            endOnServer = true,
+                            sessionId = binding.sessionId,
+                        )
                         in 500..599, 429 -> {
                             val waitMs = backoff.nextDelayMs()
                             serverRetryAtMs = now + waitMs
