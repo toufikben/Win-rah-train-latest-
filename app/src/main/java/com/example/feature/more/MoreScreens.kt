@@ -1,6 +1,7 @@
 package com.example.feature.more
 
 import android.app.Activity
+import androidx.activity.compose.LocalActivity
 import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -52,7 +53,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -364,7 +364,7 @@ fun SupportScreen(vm: MoreViewModel) {
     val p by vm.prefs.collectAsState()
     val offers by vm.offers.collectAsState()
     val msg by vm.billingMessage.collectAsState()
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     val c = Wr.colors
     LaunchedEffect(Unit) { vm.refreshBilling() }
     SubScreen("ادعم وين راح") {

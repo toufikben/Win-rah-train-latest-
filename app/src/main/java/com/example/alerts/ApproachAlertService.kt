@@ -73,6 +73,7 @@ class ApproachAlertService : Service() {
         }
 
         fun ensureChannels(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(NotificationChannel(CHANNEL_LIVE, "قطارك يقترب", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "تتبع القطار القادم إلى محطتك وتنبيه قبل وصوله"

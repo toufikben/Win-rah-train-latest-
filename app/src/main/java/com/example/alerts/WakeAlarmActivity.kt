@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -53,8 +54,16 @@ class WakeAlarmActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+            )
+        }
         enableEdgeToEdge()
         val station = intent.getStringExtra(EXTRA_STATION) ?: ""
         val prefs = (application as WinRahApplication).container.prefs
@@ -62,7 +71,14 @@ class WakeAlarmActivity : ComponentActivity() {
         // Ring until dismissed, capped at two minutes.
         val ringing = lifecycleScope.launch {
             val p = prefs.prefs.first()
-            if (p.vibrate) vibrator().vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0))
+            if (p.vibrate) {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    vibrator().vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator().vibrate(longArrayOf(0, 600, 400), 0)
+                }
+            }
             val end = System.currentTimeMillis() + 120_000
             while (isActive && System.currentTimeMillis() < end) {
                 TrainSoundSynthesizer.playSound(trainSoundById(p.alarmSoundId), p.soundVolume / 100f, alarm = true)
