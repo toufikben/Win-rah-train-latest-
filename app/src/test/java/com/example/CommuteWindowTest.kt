@@ -33,7 +33,8 @@ class CommuteWindowTest {
     fun commuteLegUsesCircularWindows() {
         val commute = Commute("a", "b", outboundMinute = 10, returnMinute = 17 * 60)
         assertEquals("a", CommuteWindow.legNow(commute, 5)?.fromStationId)
-        assertEquals("b", CommuteWindow.legNow(commute, 1430)?.fromStationId)
+        assertEquals("a", CommuteWindow.legNow(commute, 1430)?.fromStationId)
+        assertEquals("b", CommuteWindow.legNow(commute, 18 * 60)?.fromStationId)
         assertNull(CommuteWindow.legNow(commute, 12 * 60))
     }
 
