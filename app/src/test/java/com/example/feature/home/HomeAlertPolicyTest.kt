@@ -94,6 +94,17 @@ class HomeAlertPolicyTest {
     }
 
     @Test
+    fun restoreIgnoresTheViewYouAreLookingAt() {
+        assertFalse(HomeAlertPolicy.armBlocked(restore = true, upcomingCount = 0))
+    }
+
+    @Test
+    fun freshArmStillNeedsAnUpcomingTrain() {
+        assertTrue(HomeAlertPolicy.armBlocked(restore = false, upcomingCount = 0))
+        assertFalse(HomeAlertPolicy.armBlocked(restore = false, upcomingCount = 2))
+    }
+
+    @Test
     fun storedValuesRoundTripAndInvalidHeadingIsIgnored() {
         assertEquals(ArmedAlert(harrach, Heading.TO_SUBURBS), HomeAlertPolicy.armed(harrach, "TO_SUBURBS"))
         assertNull(HomeAlertPolicy.armed(null, "TO_ALGIERS"))
