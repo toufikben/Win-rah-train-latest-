@@ -57,7 +57,7 @@ object HomeAlertPolicy {
      * A fresh arm is refused when the view has nothing upcoming. Undo restores a pair the
      * rider armed moments ago, so it must not be judged by the departures of another station.
      */
-    fun armBlocked(restore: Boolean, upcomingCount: Int): Boolean = upcomingCount == 0
+    fun armBlocked(restore: Boolean, upcomingCount: Int): Boolean = !restore && upcomingCount == 0
 
     fun headingLabel(heading: Heading): String = when (heading) {
         Heading.TO_ALGIERS -> "نحو الجزائر"

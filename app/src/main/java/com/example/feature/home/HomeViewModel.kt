@@ -165,21 +165,21 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun undoSwitch() = viewModelScope.launch {
         val notice = _state.value.switchNotice ?: return@launch
         _state.value = _state.value.copy(switchNotice = null)
-        armPair(notice.undo.stationId, notice.undo.heading)
+        armPair(notice.undo.stationId, notice.undo.heading, restore = true)
     }
 
     fun dismissSwitchNotice() {
         _state.value = _state.value.copy(switchNotice = null)
     }
 
-    private suspend fun armPair(stationId: String, heading: Heading): Boolean {
+    private suspend fun armPair(stationId: String, heading: Heading, restore: Boolean = false): Boolean {
         val p = currentPrefs ?: prefs.value
         if (!canPostNotifications()) {
             _state.value = _state.value.copy(alertMessage = "فعّل إشعارات التطبيق أولًا؛ التنبيه لا يعمل بدونها.")
             return false
         }
         val upcoming = HomeDepartures.visible(lastDepartures, heading, nowMinute())
-        if (upcoming.isEmpty()) {
+        if (HomeAlertPolicy.armBlocked(restore, upcoming.size)) {
             _state.value = _state.value.copy(alertMessage = "لا توجد رحلات قادمة في هذا الاتجاه الآن؛ لم يُفعَّل التنبيه.")
             return false
         }
@@ -188,7 +188,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         ApproachAlertService.start(getApplication<Application>(), stationId, heading)
         _state.value = _state.value.copy(
             armedAlert = ArmedAlert(stationId, heading),
-            alertMessage = if (upcoming.none { it.eta != null }) {
+            // A restore carries no departures of its own; the schedule note would describe another station.
+            alertMessage = if (!restore && upcoming.none { it.eta != null }) {
                 "لا توجد بيانات مباشرة الآن؛ التنبيه جدولي (حسب التوقيت)."
             } else {
                 null
