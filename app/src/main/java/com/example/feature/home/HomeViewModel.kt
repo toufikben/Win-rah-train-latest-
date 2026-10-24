@@ -8,6 +8,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.WinRahApplication
+import com.example.alerts.AlertResumePolicy
 import com.example.alerts.ApproachAlertService
 import com.example.data.CommuteLeg
 import com.example.data.CommuteWindow
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -62,6 +64,7 @@ data class HomeState(
     val error: String? = null,
     val station: Station? = null,
     val favorites: List<Station> = emptyList(),
+    val needsStation: Boolean = false,
     val heading: Heading = Heading.TO_ALGIERS,
     val commuteMode: String? = null,      // "ذهاب" / "عودة" when the commute picked the view
     val hero: Hero? = null,
@@ -82,10 +85,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private var manualStationId: String? = null
     private var manualHeading: Heading? = null
+    private var currentPrefs: Prefs? = null
     private var refreshJob: Job? = null
 
     init {
-        viewModelScope.launch { c.prefs.prefs.collect { recompute() } }
+        viewModelScope.launch {
+            c.prefs.prefs.collect {
+                currentPrefs = it
+                recompute(it)
+            }
+        }
+        viewModelScope.launch { resumeArmedAlert() }
         start()
     }
 
@@ -103,22 +113,49 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun setHeading(h: Heading) { manualHeading = h; recompute() }
 
     fun toggleAlert() = viewModelScope.launch {
-        val p = prefs.value
+        val p = currentPrefs ?: prefs.value
         val st = _state.value.station
         if (st == null) {
             _state.value = _state.value.copy(alertMessage = "اختر محطة أولًا لتفعيل تنبيه الاقتراب.")
             return@launch
         }
-        val on = p.alertStationId != st.id
+        val heading = _state.value.heading
+        val on = !(p.alertStationId == st.id && p.alertHeading == heading.name)
         if (on && !canPostNotifications()) {
             _state.value = _state.value.copy(alertMessage = "فعّل إشعارات التطبيق أولًا؛ التنبيه لا يعمل بدونها.")
             return@launch
         }
-        c.prefs.setAlert(if (on) st.id else null, p.alertLeadMinutes)
+        val upcoming = HomeDepartures.visible(lastDepartures, heading, nowMinute())
+        if (on && upcoming.isEmpty()) {
+            _state.value = _state.value.copy(alertMessage = "لا توجد رحلات قادمة في هذا الاتجاه الآن؛ لم يُفعَّل التنبيه.")
+            return@launch
+        }
+        c.prefs.setAlert(if (on) st.id else null, p.alertLeadMinutes, if (on) heading.name else null)
         // The alert must survive the app being closed, so a foreground service follows the train.
         val ctx = getApplication<Application>()
-        if (on) ApproachAlertService.start(ctx, st.id) else ApproachAlertService.stop(ctx)
-        _state.value = _state.value.copy(alertMessage = null)
+        if (on) ApproachAlertService.start(ctx, st.id, heading) else ApproachAlertService.stop(ctx)
+        _state.value = _state.value.copy(
+            alertMessage = if (on && upcoming.none { it.eta != null }) {
+                "لا توجد بيانات مباشرة الآن؛ سننبّهك حسب الجدول."
+            } else {
+                null
+            },
+        )
+    }
+
+    /** Re-arms the tracker after a process death or force-stop; otherwise the armed label would lie. */
+    private suspend fun resumeArmedAlert() {
+        val p = c.prefs.prefs.first()
+        val stationId = p.alertStationId ?: return
+        val heading = AlertResumePolicy.headingToResume(stationId, p.alertHeading, canPostNotifications())
+        if (heading == null) {
+            c.prefs.setAlert(null, p.alertLeadMinutes, null)
+            if (!canPostNotifications()) {
+                _state.value = _state.value.copy(alertMessage = "فعّل إشعارات التطبيق أولًا؛ التنبيه لا يعمل بدونها.")
+            }
+            return
+        }
+        ApproachAlertService.start(getApplication<Application>(), stationId, heading)
     }
 
     fun clearAlertMessage() {
@@ -132,8 +169,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 Manifest.permission.POST_NOTIFICATIONS,
             ) == PackageManager.PERMISSION_GRANTED
 
-    fun setNearest(lat: Double, lon: Double) {
-        _state.value = _state.value.copy(nearest = c.network.nearest(lat, lon, 1).firstOrNull())
+    fun setNearest(lat: Double, lon: Double) = viewModelScope.launch {
+        val nearest = c.network.nearest(lat, lon, 1).firstOrNull() ?: return@launch
+        _state.value = _state.value.copy(nearest = nearest)
+        val p = c.prefs.prefs.first()
+        if (HomeSelection.shouldAdoptNearest(manualStationId, p)) {
+            manualStationId = nearest.first.id
+            refresh()
+        }
     }
 
     private var lastDepartures: List<DepartureDto> = emptyList()
@@ -142,10 +185,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         try {
             if (c.network.stations.value.isEmpty()) _state.value = _state.value.copy(serverWaking = true)
             c.network.loadReference()
-            val stationId = chooseStation(prefs.value) ?: c.network.stations.value.firstOrNull()?.id ?: return
+            val p = c.prefs.prefs.first()
+            val stationId = chooseStation(p)
+            if (stationId == null) {
+                lastDepartures = emptyList()
+                _state.value = _state.value.copy(loading = false, serverWaking = false, error = null)
+                recompute(p)
+                return
+            }
             lastDepartures = c.network.departures(stationId, 16)
             _state.value = _state.value.copy(loading = false, serverWaking = false, error = null)
-            recompute()
+            recompute(p)
         } catch (e: Exception) {
             _state.value = _state.value.copy(loading = false, serverWaking = false,
                 error = "تعذر الاتصال. نعيد المحاولة تلقائيًا.")
@@ -163,16 +213,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private fun chooseStation(p: Prefs): String? =
         manualStationId ?: commuteLeg(p)?.fromStationId ?: p.favoriteStationIds.firstOrNull() ?: p.commute?.fromStationId
 
-    private fun recompute() {
-        val p = prefs.value
+    private fun recompute(p: Prefs = currentPrefs ?: prefs.value) {
         val lines = c.network.lines.value
         val stationId = chooseStation(p)
         val station = c.network.station(stationId)
         val leg = commuteLeg(p)?.takeIf { manualStationId == null || manualStationId == it.fromStationId }
         val legHeading = leg?.let { headingBetween(lines, it.fromStationId, it.toStationId) }
         val heading = manualHeading ?: legHeading ?: _state.value.heading
-        val rows = lastDepartures.map { it.toRow(lines) }
-            .filter { it.heading == heading }
+        val rows = HomeDepartures.visible(lastDepartures, heading, nowMinute())
+            .map { it.toRow(lines) }
             .filter { row -> leg == null || reaches(lines, row.lineCode, leg.toStationId) }
         val hero = rows.firstOrNull()?.let { heroFor(it, lines, station) }
         _state.value = _state.value.copy(
@@ -186,7 +235,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             },
             hero = hero,
             next = rows.drop(1).take(4),
-            alertOn = station != null && p.alertStationId == station.id,
+            needsStation = !_state.value.loading && stationId == null,
+            alertOn = station != null && p.alertStationId == station.id && p.alertHeading == heading.name,
         )
     }
 
@@ -219,7 +269,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private fun DepartureDto.toRow(lines: List<Line>): TrainRow {
         val line = lines.firstOrNull { it.id == lineId }
         val dest = destinationNameAr ?: ""
-        val toAlgiers = dest == "الجزائر" || dest == "آغا"
+        val heading = HomeDepartures.headingOf(dest)
         val truth = when (truth) { "live" -> Truth.LIVE; "estimated" -> Truth.ESTIMATED; else -> Truth.SCHEDULED }
         val delay = eta?.let { e ->
             val expected = nowMinute() + e.min
@@ -235,10 +285,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val number = trainNumber
         return TrainRow(
             tripId = tripId, number = number, lineCode = line?.code, lineName = line?.nameAr ?: "",
-            title = if (toAlgiers) "${number ?: ""} · من ${originNameAr ?: ""}" else "${number ?: ""} · إلى $dest",
+            title = if (heading == Heading.TO_ALGIERS) "${number ?: ""} · من ${originNameAr ?: ""}" else "${number ?: ""} · إلى $dest",
             note = note, time = scheduledTime, truth = truth, etaMin = eta?.min, etaMax = eta?.max,
             delayMin = delay, riders = sourceCount,
-            heading = if (toAlgiers) Heading.TO_ALGIERS else Heading.TO_SUBURBS,
+            heading = heading,
             destination = dest, origin = originNameAr ?: "",
         )
     }

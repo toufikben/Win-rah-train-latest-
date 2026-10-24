@@ -17,8 +17,9 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.WinRahApplication
-import com.example.data.remote.dto.DepartureDto
 import com.example.design.LineColors
+import com.example.feature.home.Heading
+import com.example.feature.home.HomeDepartures
 import dz.winrah.trainradar.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,13 +38,16 @@ import kotlinx.coroutines.launch
 class ApproachAlertService : Service() {
     companion object {
         private const val EXTRA_STATION = "station"
+        private const val EXTRA_HEADING = "heading"
         private const val ACTION_STOP = "com.example.alerts.STOP"
         private const val NOTIF_ONGOING = 2001
         private const val NOTIF_APPROACH = 2011
         private const val WAITING_CAP_MS = 90 * 60_000L
 
-        fun start(context: Context, stationId: String) {
-            val i = Intent(context, ApproachAlertService::class.java).putExtra(EXTRA_STATION, stationId)
+        fun start(context: Context, stationId: String, heading: Heading) {
+            val i = Intent(context, ApproachAlertService::class.java)
+                .putExtra(EXTRA_STATION, stationId)
+                .putExtra(EXTRA_HEADING, heading.name)
             ContextCompat.startForegroundService(context, i)
         }
 
@@ -53,14 +57,26 @@ class ApproachAlertService : Service() {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
     private val container by lazy { (application as WinRahApplication).container }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) { shutdown(); return START_NOT_STICKY }
-        val stationId = intent?.getStringExtra(EXTRA_STATION) ?: return START_NOT_STICKY.also { stopSelf() }
+        if (intent?.action == ACTION_STOP) {
+            disarm()
+            shutdown()
+            return START_NOT_STICKY
+        }
+        val stationId = intent?.getStringExtra(EXTRA_STATION)
+        val heading = intent?.getStringExtra(EXTRA_HEADING)?.let { name ->
+            runCatching { Heading.valueOf(name) }.getOrNull()
+        }
+        if (stationId == null || heading == null) {
+            shutdown()
+            return START_NOT_STICKY
+        }
         AlertChannels.ensure(this)
         ServiceCompat.startForeground(
             this,
@@ -69,11 +85,15 @@ class ApproachAlertService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
         job?.cancel()
-        job = scope.launch { runWaiting(stationId) }
+        job = scope.launch {
+            runWaiting(stationId, heading)
+            clearArmIfCurrent(stationId, heading)
+            shutdown()
+        }
         return START_REDELIVER_INTENT
     }
 
-    private suspend fun runWaiting(stationId: String) {
+    private suspend fun runWaiting(stationId: String, heading: Heading) {
         val started = System.currentTimeMillis()
         val lead = container.prefs.prefs.first().alertLeadMinutes
         var notified = false
@@ -83,47 +103,67 @@ class ApproachAlertService : Service() {
                 container.network.loadReference()
                 container.network.station(stationId)
             }.getOrNull()
-            val departures: List<DepartureDto> = runCatching {
-                container.network.departures(stationId, 6)
-            }.getOrDefault(emptyList())
-            val next = if (trip == null) departures.firstOrNull() else departures.firstOrNull { it.tripId == trip }
-            if (next == null) {
-                if (trip != null) break
+            val departures = runCatching {
+                container.network.departures(stationId, 16)
+            }.getOrNull()
+            if (departures == null) {
                 delay(20_000)
                 continue
             }
-            if (station != null) {
-                trip = next.tripId
-                val eta = next.eta?.min
-                val title = "${next.trainNumber ?: "القطار"} نحو ${next.destinationNameAr ?: ""}"
-                val text = when {
-                    eta == null -> "مجدول ${next.scheduledTime} · لا أحد يشاركه بعد"
-                    eta <= 0 -> "يصل الآن إلى ${station.nameAr}"
-                    else -> "يصل إلى ${station.nameAr} خلال $eta د"
-                }
-                val progress = eta?.let { (100 - it.coerceIn(0, 15) * 100 / 15) }
-                notify(NOTIF_ONGOING, liveNotification(text, title, progress, LineColors.forId(next.lineId).hashCode()))
-                if (!notified && eta != null && eta <= lead) {
-                    notified = true
-                    notify(
-                        NOTIF_APPROACH,
-                        NotificationCompat.Builder(this, AlertChannels.LIVE)
-                            .setSmallIcon(R.drawable.ic_stat_train)
-                            .setContentTitle("قطارك يقترب")
-                            .setContentText(text)
-                            .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                            .setContentIntent(openApp())
-                            .setAutoCancel(true)
-                            .build(),
-                    )
-                    playSound()
-                }
-                if (eta != null && eta <= 0 && notified) break
+            val now = HomeDepartures.nowMinute()
+            val next = HomeDepartures.nextForAlert(departures, heading, now, trip)
+            if (next == null) {
+                if (departures.isNotEmpty()) break
+                delay(20_000)
+                continue
             }
+            trip = next.tripId
+            val stationName = station?.nameAr ?: "محطتك"
+            val liveEta = next.eta?.min
+            val eta = HomeDepartures.etaMinutes(next, now)
+            val title = "${next.trainNumber ?: "القطار"} نحو ${next.destinationNameAr ?: ""}"
+            val text = when {
+                liveEta == null && eta != null -> "مجدول ${next.scheduledTime} · التنبيه حسب الجدول"
+                eta == null -> "مجدول ${next.scheduledTime} · لا أحد يشاركه بعد"
+                eta <= 0 -> "يصل الآن إلى $stationName"
+                else -> "يصل إلى $stationName خلال $eta د"
+            }
+            val progress = eta?.let { (100 - it.coerceIn(0, 15) * 100 / 15) }
+            notify(NOTIF_ONGOING, liveNotification(text, title, progress, LineColors.forId(next.lineId).hashCode()))
+            if (!notified && eta != null && eta <= lead) {
+                notified = true
+                notify(
+                    NOTIF_APPROACH,
+                    NotificationCompat.Builder(this, AlertChannels.LIVE)
+                        .setSmallIcon(R.drawable.ic_stat_train)
+                        .setContentTitle("قطارك يقترب")
+                        .setContentText(text)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                        .setContentIntent(openApp())
+                        .setAutoCancel(true)
+                        .build(),
+                )
+                playSound()
+            }
+            if (eta != null && eta <= 0 && notified) break
             delay(20_000)
         }
-        shutdown()
+    }
+
+    /** Ends the service without leaving an armed label behind when the rider stopped it. */
+    private fun disarm() {
+        cleanupScope.launch {
+            val p = container.prefs.prefs.first()
+            if (p.alertStationId != null) container.prefs.setAlert(null, p.alertLeadMinutes, null)
+        }
+    }
+
+    private suspend fun clearArmIfCurrent(stationId: String, heading: Heading) {
+        val p = container.prefs.prefs.first()
+        if (p.alertStationId == stationId && p.alertHeading == heading.name) {
+            container.prefs.setAlert(null, p.alertLeadMinutes, null)
+        }
     }
 
     private fun liveNotification(

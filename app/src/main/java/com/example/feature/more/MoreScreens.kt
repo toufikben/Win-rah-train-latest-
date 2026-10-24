@@ -111,7 +111,9 @@ class MoreViewModel(app: Application) : AndroidViewModel(app) {
     fun setAlarmSound(id: String) = viewModelScope.launch { c.prefs.setAlarmSound(id) }
     fun setVolume(v: Int) = viewModelScope.launch { c.prefs.setVolume(v) }
     fun setVibrate(v: Boolean) = viewModelScope.launch { c.prefs.setVibrate(v) }
-    fun setLead(m: Int) = viewModelScope.launch { c.prefs.setAlert(prefs.value.alertStationId, m) }
+    fun setLead(m: Int) = viewModelScope.launch {
+        c.prefs.setAlert(prefs.value.alertStationId, m, prefs.value.alertHeading)
+    }
     fun setTheme(t: String) = viewModelScope.launch { c.prefs.setTheme(t) }
 
     fun setCommute(cm: Commute?) {

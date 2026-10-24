@@ -8,5 +8,8 @@ object AlertResumePolicy {
         stationId: String?,
         headingName: String?,
         notificationsGranted: Boolean,
-    ): Heading? = null
+    ): Heading? {
+        if (stationId == null || !notificationsGranted) return null
+        return headingName?.let { name -> runCatching { Heading.valueOf(name) }.getOrNull() }
+    }
 }

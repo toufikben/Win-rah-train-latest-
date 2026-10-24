@@ -47,7 +47,7 @@ private val PAGES = listOf(
     Page("نم مطمئنًا", "اختر محطتك وسننبهك قبل الوصول بدقائق، حتى لو كان الهاتف في جيبك."),
 )
 
-/** Three short pages, then the caller asks for the favourite station. */
+/** Three short pages; the shell then asks for notification and location permissions. */
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
     var page by rememberSaveable { mutableIntStateOf(0) }

@@ -26,6 +26,7 @@ data class Prefs(
     val favoriteStationIds: List<String> = emptyList(),
     val commute: Commute? = null,
     val alertStationId: String? = null,
+    val alertHeading: String? = null,
     val wakeStationId: String? = null,
     val alertLeadMinutes: Int = 5,
     val soundId: String = "electric",
@@ -53,6 +54,7 @@ class UserPrefsRepository(private val context: Context) {
         val commuteOut = intPreferencesKey("commute_out_min")
         val commuteBack = intPreferencesKey("commute_back_min")
         val alertStation = stringPreferencesKey("alert_station")
+        val alertHeading = stringPreferencesKey("alert_heading")
         val wakeStation = stringPreferencesKey("wake_station")
         val alertLead = intPreferencesKey("alert_lead_min")
         val sound = stringPreferencesKey("sound_id")
@@ -74,6 +76,7 @@ class UserPrefsRepository(private val context: Context) {
                 Commute(from, to, p[K.commuteOut] ?: 420, p[K.commuteBack] ?: 1020)
             } else null,
             alertStationId = p[K.alertStation],
+            alertHeading = p[K.alertHeading],
             wakeStationId = p[K.wakeStation],
             alertLeadMinutes = p[K.alertLead] ?: 5,
             soundId = p[K.sound] ?: "electric",
@@ -99,8 +102,14 @@ class UserPrefsRepository(private val context: Context) {
         }
     }
 
-    suspend fun setAlert(stationId: String?, leadMinutes: Int = 5) = context.store.edit {
-        if (stationId == null) it.remove(K.alertStation) else it[K.alertStation] = stationId
+    suspend fun setAlert(stationId: String?, leadMinutes: Int = 5, heading: String? = null) = context.store.edit {
+        if (stationId == null) {
+            it.remove(K.alertStation)
+            it.remove(K.alertHeading)
+        } else {
+            it[K.alertStation] = stationId
+            if (heading == null) it.remove(K.alertHeading) else it[K.alertHeading] = heading
+        }
         it[K.alertLead] = leadMinutes
     }
 

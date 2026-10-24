@@ -83,6 +83,7 @@ fun HomeScreen(
             when {
                 s.serverWaking -> WakingCard()
                 s.hero != null -> HeroCard(s, onToggleAlert = { vm.toggleAlert() })
+                !s.loading && s.needsStation -> ChooseStationCard(onAdd = onOpenFavorites)
                 !s.loading -> EmptyHero(s)
             }
             s.error?.let {
@@ -242,6 +243,25 @@ private fun EmptyHero(s: HomeState) {
     WrCard(Modifier.padding(horizontal = 20.dp).fillMaxWidth(), padding = androidx.compose.foundation.layout.PaddingValues(18.dp)) {
         Text("لا قطارات أخرى اليوم في هذا الاتجاه", style = WrType.bodyStrong, color = c.ink)
         Text("من ${s.station?.nameAr ?: "محطتك"}. جرّب الاتجاه الآخر أو محطة أخرى.", style = WrType.small, color = c.inkMuted)
+    }
+}
+
+@Composable
+private fun ChooseStationCard(onAdd: () -> Unit) {
+    val c = Wr.colors
+    WrCard(Modifier.padding(horizontal = 20.dp).fillMaxWidth(), padding = androidx.compose.foundation.layout.PaddingValues(18.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("اختر محطتك", style = WrType.bodyStrong, color = c.ink)
+            Text("لم نعرف محطتك المفضلة بعد. أضف محطة لنعرض القطارات القادمة إليها ونفعّل التنبيه.", style = WrType.small, color = c.inkMuted)
+            Row(
+                Modifier.clip(RoundedCornerShape(12.dp)).background(c.ink)
+                    .clickable(role = Role.Button, onClick = onAdd).padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Rounded.Add, null, tint = c.card, modifier = Modifier.size(16.dp))
+                Text("إضافة محطة", style = WrType.bodyStrong.copy(fontSize = 13.sp), color = c.card)
+            }
+        }
     }
 }
 
