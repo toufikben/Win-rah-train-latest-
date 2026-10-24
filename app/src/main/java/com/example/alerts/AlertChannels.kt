@@ -8,6 +8,7 @@ import android.os.Build
 object AlertChannels {
     const val LIVE = "winrah_live_alert"
     const val ALARM = "winrah_wake_alarm"
+    const val BOOT = "winrah_boot_resume"
 
     fun ensure(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -22,6 +23,12 @@ object AlertChannels {
                 description = "يوقظك قبل الوصول إلى محطتك"
                 setSound(null, null)
                 enableVibration(true)
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(BOOT, "استئناف التنبيه بعد الإقلاع", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "تذكير باستئناف تنبيه الاقتراب بعد إعادة تشغيل الهاتف"
+                setSound(null, null)
             },
         )
     }

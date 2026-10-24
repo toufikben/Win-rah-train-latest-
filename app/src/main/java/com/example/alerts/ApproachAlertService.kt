@@ -44,15 +44,20 @@ class ApproachAlertService : Service() {
         private const val NOTIF_APPROACH = 2011
         private const val WAITING_CAP_MS = 90 * 60_000L
 
-        fun start(context: Context, stationId: String, heading: Heading) {
-            val i = Intent(context, ApproachAlertService::class.java)
+        fun intentFor(context: Context, stationId: String, heading: Heading): Intent =
+            Intent(context, ApproachAlertService::class.java)
                 .putExtra(EXTRA_STATION, stationId)
                 .putExtra(EXTRA_HEADING, heading.name)
-            ContextCompat.startForegroundService(context, i)
+
+        fun start(context: Context, stationId: String, heading: Heading) {
+            ContextCompat.startForegroundService(context, intentFor(context, stationId, heading))
         }
 
+        fun stopIntent(context: Context): Intent =
+            Intent(context, ApproachAlertService::class.java).setAction(ACTION_STOP)
+
         fun stop(context: Context) {
-            context.startService(Intent(context, ApproachAlertService::class.java).setAction(ACTION_STOP))
+            context.startService(stopIntent(context))
         }
     }
 
@@ -65,6 +70,8 @@ class ApproachAlertService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            // A previous heads-up may still sit in the shade; stopping the alert means dropping it too.
+            NotificationManagerCompat.from(this).cancel(NOTIF_APPROACH)
             disarm()
             shutdown()
             return START_NOT_STICKY
@@ -119,25 +126,26 @@ class ApproachAlertService : Service() {
             }
             trip = next.tripId
             val stationName = station?.nameAr ?: "محطتك"
-            val liveEta = next.eta?.min
             val eta = HomeDepartures.etaMinutes(next, now)
-            val title = "${next.trainNumber ?: "القطار"} نحو ${next.destinationNameAr ?: ""}"
-            val text = when {
-                liveEta == null && eta != null -> "مجدول ${next.scheduledTime} · التنبيه حسب الجدول"
-                eta == null -> "مجدول ${next.scheduledTime} · لا أحد يشاركه بعد"
-                eta <= 0 -> "يصل الآن إلى $stationName"
-                else -> "يصل إلى $stationName خلال $eta د"
-            }
+            val copy = AlertNotificationText.waiting(
+                trainNumber = next.trainNumber,
+                destinationNameAr = next.destinationNameAr,
+                stationName = stationName,
+                scheduledTime = next.scheduledTime,
+                liveEtaMin = next.eta?.min,
+                etaMin = eta,
+            )
             val progress = eta?.let { (100 - it.coerceIn(0, 15) * 100 / 15) }
-            notify(NOTIF_ONGOING, liveNotification(text, title, progress, LineColors.forId(next.lineId).hashCode()))
+            notify(NOTIF_ONGOING, liveNotification(copy.text, copy.title, progress, LineColors.forId(next.lineId).hashCode()))
             if (!notified && eta != null && eta <= lead) {
                 notified = true
+                val approach = AlertNotificationText.approach(copy)
                 notify(
                     NOTIF_APPROACH,
                     NotificationCompat.Builder(this, AlertChannels.LIVE)
                         .setSmallIcon(R.drawable.ic_stat_train)
-                        .setContentTitle("قطارك يقترب")
-                        .setContentText(text)
+                        .setContentTitle(approach.title)
+                        .setContentText(approach.text)
                         .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setCategory(NotificationCompat.CATEGORY_REMINDER)
                         .setContentIntent(openApp())

@@ -136,7 +136,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (on) ApproachAlertService.start(ctx, st.id, heading) else ApproachAlertService.stop(ctx)
         _state.value = _state.value.copy(
             alertMessage = if (on && upcoming.none { it.eta != null }) {
-                "لا توجد بيانات مباشرة الآن؛ سننبّهك حسب الجدول."
+                "لا توجد بيانات مباشرة الآن؛ التنبيه جدولي (حسب التوقيت)."
             } else {
                 null
             },

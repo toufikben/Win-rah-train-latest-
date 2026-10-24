@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -128,7 +129,8 @@ private fun walk(m: Double): String {
 @Composable
 private fun Header(onOpenNotifications: () -> Unit) {
     val c = Wr.colors
-    val now = LocalTime.now(ZoneOffset.ofHours(1))
+    val now by remember { HeaderTicker().times() }
+        .collectAsState(initial = LocalTime.now(ZoneOffset.ofHours(1)))
     val greeting = if (now.hour < 12) "صباح الخير" else "مساء الخير"
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
