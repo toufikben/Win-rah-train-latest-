@@ -34,6 +34,15 @@ interface TrainApi {
     @GET("trains")
     suspend fun getLiveTrains(): List<LiveTrainDto>
 
+    @GET("lines")
+    suspend fun getLines(): List<com.example.data.remote.dto.LineDto>
+
+    @GET("stations/{station_id}/departures")
+    suspend fun getDepartures(
+        @Path("station_id") stationId: String,
+        @Query("limit") limit: Int = 12,
+    ): List<com.example.data.remote.dto.DepartureDto>
+
     @GET("map/railway-segments.geojson")
     suspend fun getRailwaySegments(): RailwaySegmentsResponse
 

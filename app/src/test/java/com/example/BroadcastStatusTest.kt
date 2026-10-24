@@ -39,4 +39,20 @@ class BroadcastStatusTest {
         assertFalse(BroadcastState.Idle.isActive)
         assertFalse(BroadcastState.Stopped(StopReason.USER).isActive)
     }
+
+    @Test
+    fun throttleFollowsServerSuggestionWithinBounds() {
+        val t = ObservationThrottle()
+        t.applySuggested(60.0)
+        assertEquals(60_000L, t.intervalMs)
+        t.onAttempt(0L)
+        assertFalse(t.shouldAttempt(59_000L))
+        assertTrue(t.shouldAttempt(60_000L))
+        t.applySuggested(0.5)
+        assertEquals(ObservationThrottle.MIN_MS, t.intervalMs)
+        t.applySuggested(10_000)
+        assertEquals(ObservationThrottle.MAX_MS, t.intervalMs)
+        t.applySuggested(null)
+        assertEquals(ObservationThrottle.MAX_MS, t.intervalMs)
+    }
 }

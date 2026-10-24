@@ -1,43 +1,18 @@
 package com.example
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.core.content.ContextCompat
-import com.example.ui.components.TrainBottomNav
-import dz.winrah.trainradar.BuildConfig
-import com.example.ui.screens.AnimatedSplashScreen
-import com.example.ui.screens.DiagnosticsScreen
-import com.example.ui.screens.HomeScreen
-import com.example.ui.screens.MapScreen
-import com.example.ui.screens.OnboardScreen
-import com.example.ui.screens.SettingsScreen
-import com.example.ui.theme.MyApplicationTheme
+import com.example.design.WinRahTheme
 import com.example.viewmodel.TrainViewModel
 
 class MainActivity : ComponentActivity() {
@@ -50,102 +25,16 @@ class MainActivity : ComponentActivity() {
                 viewModel.setAppVisible(true)
                 onStopOrDispose { viewModel.setAppVisible(false) }
             }
-            val selectedTheme by viewModel.selectedTheme.collectAsState()
-            val notificationPermissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission()
-            ) { /* The helper independently checks permission before posting. */ }
-
-            val isDarkTheme = when (selectedTheme) {
+            val prefs by (application as WinRahApplication).container.prefs.prefs.collectAsState(initial = null)
+            val p = prefs ?: return@setContent // DataStore answers within a frame; avoids a first-run flash.
+            val dark = when (p.theme) {
                 "light" -> false
-                "dark", "amoled" -> true
+                "dark" -> true
                 else -> isSystemInDarkTheme()
             }
-
-            var isSplashVisible by rememberSaveable { mutableStateOf(true) }
-
-            LaunchedEffect(isSplashVisible) {
-                if (!isSplashVisible && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    ContextCompat.checkSelfPermission(
-                        this@MainActivity,
-                        Manifest.permission.POST_NOTIFICATIONS,
-                    ) != PackageManager.PERMISSION_GRANTED
-                ) {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            }
-
-            MyApplicationTheme(darkTheme = isDarkTheme) {
-                Crossfade(
-                    targetState = isSplashVisible,
-                    animationSpec = tween(600),
-                    label = "splash_crossfade"
-                ) { showSplash ->
-                    if (showSplash) {
-                        AnimatedSplashScreen(
-                            onSplashFinished = { isSplashVisible = false }
-                        )
-                    } else {
-                        var currentRoute by rememberSaveable { mutableStateOf("radar") }
-                        val pendingRestore by viewModel.pendingRestore.collectAsState()
-
-                        if (pendingRestore != null) {
-                            AlertDialog(
-                                onDismissRequest = { /* an explicit answer is required */ },
-                                title = { Text("مشاركة سابقة لم تكتمل") },
-                                text = {
-                                    Text(
-                                        "كنت تشارك موقعك من القطار ولم تُنهِ المشاركة. " +
-                                            "هل ما زلت في القطار وتريد استئنافها؟"
-                                    )
-                                },
-                                confirmButton = {
-                                    TextButton(onClick = { viewModel.answerPendingRestore(resume = true) }) {
-                                        Text("استئناف")
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { viewModel.answerPendingRestore(resume = false) }) {
-                                        Text("إنهاء")
-                                    }
-                                },
-                            )
-                        }
-
-                        Scaffold(
-                            modifier = Modifier.fillMaxSize(),
-                            bottomBar = {
-                                TrainBottomNav(
-                                    currentRoute = if (currentRoute == "diagnostics") "settings" else currentRoute,
-                                    onNavigate = { route -> currentRoute = route }
-                                )
-                            }
-                        ) { innerPadding ->
-                            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                                when (currentRoute) {
-                                    "radar" -> HomeScreen(
-                                        viewModel = viewModel,
-                                        onNavigateToMap = { currentRoute = "map" },
-                                        onNavigateToOnboard = { currentRoute = "onboard" }
-                                    )
-                                    "map" -> MapScreen(viewModel = viewModel)
-                                    "onboard" -> OnboardScreen(viewModel = viewModel)
-                                    "settings" -> SettingsScreen(
-                                        viewModel = viewModel,
-                                        onOpenDiagnostics = {
-                                            if (BuildConfig.DIAGNOSTICS_ENABLED) currentRoute = "diagnostics"
-                                        },
-                                    )
-                                    "diagnostics" -> if (BuildConfig.DIAGNOSTICS_ENABLED) {
-                                        DiagnosticsScreen(
-                                            onBack = { currentRoute = "settings" },
-                                        )
-                                    } else {
-                                        SettingsScreen(viewModel = viewModel)
-                                    }
-                                }
-                            }
-                        }
-                    }
+            WinRahTheme(darkTheme = dark) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    AppShell(p, viewModel)
                 }
             }
         }

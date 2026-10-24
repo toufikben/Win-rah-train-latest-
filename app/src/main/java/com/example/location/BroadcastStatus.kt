@@ -35,8 +35,24 @@ object BroadcastStatusRepository {
  * previous attempt succeeded or not. A rejected attempt must not unlock
  * an immediate retry on the next GPS fix.
  */
-class ObservationThrottle(private val minIntervalMs: Long = 10_000L) {
+class ObservationThrottle(private var minIntervalMs: Long = 10_000L) {
     private var lastAttemptAtMs: Long? = null
+
+    /**
+     * Applies the server's `suggested_interval_s`: crowded trains ask reserve riders to send less
+     * often to save battery. Clamped so a bad value can neither flood the server nor go silent.
+     */
+    fun applySuggested(seconds: Number?) {
+        val s = seconds?.toDouble() ?: return
+        minIntervalMs = (s * 1000).toLong().coerceIn(MIN_MS, MAX_MS)
+    }
+
+    val intervalMs: Long get() = minIntervalMs
+
+    companion object {
+        const val MIN_MS = 5_000L
+        const val MAX_MS = 120_000L
+    }
 
     fun shouldAttempt(nowMs: Long): Boolean {
         val last = lastAttemptAtMs ?: return true

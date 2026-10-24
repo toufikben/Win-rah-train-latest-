@@ -11,7 +11,7 @@ plugins {
 
 android {
   namespace = "dz.winrah.trainradar"
-  compileSdk = 36
+  compileSdk = 37
 
   fun buildConfigString(value: String): String =
     "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -61,6 +61,8 @@ android {
     buildConfigField("String", "WINRAH_API_ENVIRONMENT", buildConfigString(configuredApiEnvironment))
     buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", configuredApiWritesEnabled.toString())
     buildConfigField("boolean", "USE_MOCK_LIVE_DATA", configuredMockLiveData.toString())
+    // Fake-GPS apps are accepted only by the separate .testwrite build, for field testing.
+    buildConfigField("boolean", "ALLOW_MOCK_LOCATION", configuredTestWriteApp.toString())
     manifestPlaceholders["usesCleartextTraffic"] = false
     manifestPlaceholders["appLabel"] = if (configuredTestWriteApp) {
       "@string/app_name_test_write"
@@ -91,6 +93,7 @@ android {
       // Production must never ship diagnostics or mock live-train data.
       buildConfigField("boolean", "USE_MOCK_LIVE_DATA", "false")
       buildConfigField("boolean", "DIAGNOSTICS_ENABLED", "false")
+      buildConfigField("boolean", "ALLOW_MOCK_LOCATION", "false")
       // Release honors the explicit release-time opt-in (see android-release.yml);
       // defaults to false when WINRAH_API_WRITES_ENABLED is not explicitly set.
       buildConfigField("boolean", "WINRAH_API_WRITES_ENABLED", requestedApiWritesEnabled.toString())
@@ -112,6 +115,7 @@ android {
   }
 
   compileOptions {
+    isCoreLibraryDesugaringEnabled = true
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
@@ -139,8 +143,8 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  coreLibraryDesugaring(libs.desugar.jdk.libs)
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
@@ -154,16 +158,18 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  // implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
-  // implementation(libs.androidx.navigation.compose)
+  implementation(libs.androidx.navigation.compose)
+  implementation(libs.billing.ktx)
+  implementation(libs.androidx.work.runtime.ktx)
+  implementation(libs.maplibre.android)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
 
@@ -173,7 +179,6 @@ dependencies {
   // implementation(libs.androidx.credentials)
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)

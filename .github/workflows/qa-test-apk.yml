@@ -1,0 +1,127 @@
+name: QA test APK (.testwrite)
+
+on:
+  push:
+    tags:
+      - "qa-test-*"
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "Branch to build"
+        required: true
+        default: "overhaul/phase2-app"
+        type: string
+      version_name:
+        description: "QA version name"
+        required: true
+        default: "1.0.1-qa.3"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-test-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-qa-apk:
+    name: Build installable QA APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: ${{ inputs.version_name || '1.0.1-qa.3' }}
+      WINRAH_API_BASE_URL: https://train-api-uep7.onrender.com/
+      WINRAH_API_ENVIRONMENT: production
+
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_branch || github.sha }}
+          fetch-depth: 1
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: Create ephemeral debug keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          echo "DEBUG_KEYSTORE_PATH=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
+
+      - name: Build QA debug APK (separate .testwrite package)
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace \
+            -PWINRAH_API_BASE_URL="$WINRAH_API_BASE_URL" \
+            -PWINRAH_API_ENVIRONMENT="$WINRAH_API_ENVIRONMENT" \
+            -PWINRAH_API_WRITES_ENABLED=false \
+            -PWINRAH_TEST_WRITE_APP=true \
+            -PKEYSTORE_PATH="$DEBUG_KEYSTORE_PATH" \
+            assembleDebug
+
+      - name: Verify APK identity and write build info
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$apk"
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$apksigner_path"
+          "$apksigner_path" verify --verbose "$apk"
+          apkanalyzer manifest application-id "$apk"
+          sha256sum "$apk" | tee app-debug.sha256
+          {
+            echo "APPLICATION_ID=$(apkanalyzer manifest application-id "$apk")"
+            echo "VERSION_CODE=$VERSION_CODE"
+            echo "VERSION_NAME=$VERSION_NAME"
+            echo "API_BASE_URL=$WINRAH_API_BASE_URL"
+            echo "API_WRITES_ENABLED=false"
+            echo "SOURCE_BRANCH=${{ inputs.source_branch || github.ref_name }}"
+            echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          } | tee qa-test-build.txt
+
+      - name: Upload QA APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winrah-qa-testwrite-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app-debug.sha256
+            qa-test-build.txt
+
+      - name: Remove ephemeral signing material
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/debug.keystore"
