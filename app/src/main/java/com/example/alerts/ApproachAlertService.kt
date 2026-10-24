@@ -72,6 +72,7 @@ class ApproachAlertService : Service() {
         if (intent?.action == ACTION_STOP) {
             // A previous heads-up may still sit in the shade; stopping the alert means dropping it too.
             NotificationManagerCompat.from(this).cancel(NOTIF_APPROACH)
+            NotificationManagerCompat.from(this).cancel(BootResumeReceiver.NOTIF_RESUME)
             disarm()
             shutdown()
             return START_NOT_STICKY
@@ -91,6 +92,8 @@ class ApproachAlertService : Service() {
             liveNotification("جارٍ التحضير…", null, null),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
+        // The boot prompt asked for this resume; it must not outlive the answer.
+        NotificationManagerCompat.from(this).cancel(BootResumeReceiver.NOTIF_RESUME)
         job?.cancel()
         job = scope.launch {
             runWaiting(stationId, heading)
