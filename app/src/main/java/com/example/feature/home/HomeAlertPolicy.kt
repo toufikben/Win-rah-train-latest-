@@ -20,19 +20,41 @@ data class ArmedBanner(
 object HomeAlertPolicy {
     const val UNKNOWN_STATION = "محطة محفوظة"
 
-    fun armed(stationId: String?, heading: String?): ArmedAlert? = null
+    fun armed(stationId: String?, heading: String?): ArmedAlert? {
+        if (stationId == null || heading == null) return null
+        val parsed = Heading.entries.firstOrNull { it.name == heading } ?: return null
+        return ArmedAlert(stationId, parsed)
+    }
 
-    fun tap(armed: ArmedAlert?, stationId: String, heading: Heading): AlertTap =
-        AlertTap.Arm(stationId, heading)
+    fun tap(armed: ArmedAlert?, stationId: String, heading: Heading): AlertTap = when {
+        armed == null -> AlertTap.Arm(stationId, heading)
+        armed.stationId == stationId && armed.heading == heading -> AlertTap.Cancel
+        else -> AlertTap.Replace(armed, ArmedAlert(stationId, heading))
+    }
 
     fun banner(
         armed: ArmedAlert?,
         currentStationId: String?,
         currentHeading: Heading?,
         stationName: (String) -> String?,
-    ): ArmedBanner? = null
+    ): ArmedBanner? {
+        if (armed == null) return null
+        return ArmedBanner(
+            stationName = stationName(armed.stationId) ?: UNKNOWN_STATION,
+            headingLabel = headingLabel(armed.heading),
+            followsCurrentView = armed.stationId == currentStationId && armed.heading == currentHeading,
+        )
+    }
 
-    fun bannerText(banner: ArmedBanner): String = ""
+    fun bannerText(banner: ArmedBanner): String =
+        if (banner.followsCurrentView) {
+            "التنبيه مفعّل · ${banner.stationName} · ${banner.headingLabel}"
+        } else {
+            "التنبيه مفعّل على ${banner.stationName} · ${banner.headingLabel} — لا يتبع اختيارك الحالي"
+        }
 
-    fun headingLabel(heading: Heading): String = ""
+    fun headingLabel(heading: Heading): String = when (heading) {
+        Heading.TO_ALGIERS -> "نحو الجزائر"
+        Heading.TO_SUBURBS -> "نحو الضواحي"
+    }
 }

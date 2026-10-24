@@ -72,7 +72,13 @@ data class HomeState(
     val nearest: Pair<Station, Double>? = null,
     val alertOn: Boolean = false,
     val alertMessage: String? = null,
+    val armedAlert: ArmedAlert? = null,
+    val armedBanner: ArmedBanner? = null,
+    val switchNotice: SwitchNotice? = null,
 )
+
+/** "The alert moved to X"; the undo target is the pair it came from. */
+data class SwitchNotice(val message: String, val undo: ArmedAlert)
 
 /** Algeria is UTC+1 all year. */
 private val ALGERIA: ZoneOffset = ZoneOffset.ofHours(1)
@@ -113,34 +119,89 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun setHeading(h: Heading) { manualHeading = h; recompute() }
 
     fun toggleAlert() = viewModelScope.launch {
-        val p = currentPrefs ?: prefs.value
         val st = _state.value.station
         if (st == null) {
             _state.value = _state.value.copy(alertMessage = "اختر محطة أولًا لتفعيل تنبيه الاقتراب.")
             return@launch
         }
         val heading = _state.value.heading
-        val on = !(p.alertStationId == st.id && p.alertHeading == heading.name)
-        if (on && !canPostNotifications()) {
+        val armedNow = _state.value.armedAlert
+        when (val tap = HomeAlertPolicy.tap(armedNow, st.id, heading)) {
+            AlertTap.Cancel -> {
+                disarm()
+                _state.value = _state.value.copy(alertMessage = null, switchNotice = null)
+            }
+            is AlertTap.Arm -> armPair(tap.stationId, tap.heading)
+            is AlertTap.Replace -> {
+                if (armPair(tap.to.stationId, tap.to.heading)) {
+                    val toName = c.network.station(tap.to.stationId)?.nameAr ?: HomeAlertPolicy.UNKNOWN_STATION
+                    _state.value = _state.value.copy(
+                        switchNotice = SwitchNotice(
+                            "نُقل التنبيه إلى $toName · ${HomeAlertPolicy.headingLabel(tap.to.heading)}",
+                            tap.from,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    /** Cancels whatever is armed, even when the banner is showing a pair the view left behind. */
+    fun cancelAlert() = viewModelScope.launch {
+        val p = currentPrefs ?: prefs.value
+        if (p.alertStationId == null) return@launch
+        disarm()
+        _state.value = _state.value.copy(alertMessage = null, switchNotice = null)
+    }
+
+    /** Jumps the view to the armed pair so the hero and the alert describe the same train. */
+    fun showArmedAlert() {
+        val a = _state.value.armedAlert ?: return
+        manualStationId = a.stationId
+        manualHeading = a.heading
+        viewModelScope.launch { refresh() }
+    }
+
+    fun undoSwitch() = viewModelScope.launch {
+        val notice = _state.value.switchNotice ?: return@launch
+        _state.value = _state.value.copy(switchNotice = null)
+        armPair(notice.undo.stationId, notice.undo.heading)
+    }
+
+    fun dismissSwitchNotice() {
+        _state.value = _state.value.copy(switchNotice = null)
+    }
+
+    private suspend fun armPair(stationId: String, heading: Heading): Boolean {
+        val p = currentPrefs ?: prefs.value
+        if (!canPostNotifications()) {
             _state.value = _state.value.copy(alertMessage = "فعّل إشعارات التطبيق أولًا؛ التنبيه لا يعمل بدونها.")
-            return@launch
+            return false
         }
         val upcoming = HomeDepartures.visible(lastDepartures, heading, nowMinute())
-        if (on && upcoming.isEmpty()) {
+        if (upcoming.isEmpty()) {
             _state.value = _state.value.copy(alertMessage = "لا توجد رحلات قادمة في هذا الاتجاه الآن؛ لم يُفعَّل التنبيه.")
-            return@launch
+            return false
         }
-        c.prefs.setAlert(if (on) st.id else null, p.alertLeadMinutes, if (on) heading.name else null)
+        c.prefs.setAlert(stationId, p.alertLeadMinutes, heading.name)
         // The alert must survive the app being closed, so a foreground service follows the train.
-        val ctx = getApplication<Application>()
-        if (on) ApproachAlertService.start(ctx, st.id, heading) else ApproachAlertService.stop(ctx)
+        ApproachAlertService.start(getApplication<Application>(), stationId, heading)
         _state.value = _state.value.copy(
-            alertMessage = if (on && upcoming.none { it.eta != null }) {
+            armedAlert = ArmedAlert(stationId, heading),
+            alertMessage = if (upcoming.none { it.eta != null }) {
                 "لا توجد بيانات مباشرة الآن؛ التنبيه جدولي (حسب التوقيت)."
             } else {
                 null
             },
         )
+        return true
+    }
+
+    private suspend fun disarm() {
+        val p = currentPrefs ?: prefs.value
+        c.prefs.setAlert(null, p.alertLeadMinutes, null)
+        ApproachAlertService.stop(getApplication())
+        _state.value = _state.value.copy(armedAlert = null, armedBanner = null, alertOn = false)
     }
 
     /** Re-arms the tracker after a process death or force-stop; otherwise the armed label would lie. */
@@ -224,6 +285,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             .map { it.toRow(lines) }
             .filter { row -> leg == null || reaches(lines, row.lineCode, leg.toStationId) }
         val hero = rows.firstOrNull()?.let { heroFor(it, lines, station) }
+        val armedNow = HomeAlertPolicy.armed(p.alertStationId, p.alertHeading)
         _state.value = _state.value.copy(
             station = station,
             favorites = p.favoriteStationIds.mapNotNull { c.network.station(it) },
@@ -237,6 +299,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             next = rows.drop(1).take(4),
             needsStation = !_state.value.loading && stationId == null,
             alertOn = station != null && p.alertStationId == station.id && p.alertHeading == heading.name,
+            armedAlert = armedNow,
+            armedBanner = HomeAlertPolicy.banner(armedNow, stationId, heading) { c.network.station(it)?.nameAr },
         )
     }
 

@@ -27,8 +27,13 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -71,52 +76,69 @@ fun HomeScreen(
 ) {
     val s by vm.state.collectAsState()
     val c = Wr.colors
-    Column(Modifier.fillMaxSize().background(c.ground)) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Header(onOpenNotifications)
-            FavoritesRow(s, onSelect = vm::selectStation, onAdd = onOpenFavorites)
-            Segmented(
-                options = listOf("نحو الجزائر", "نحو الضواحي"),
-                selected = if (s.heading == Heading.TO_ALGIERS) 0 else 1,
-                onSelect = { vm.setHeading(if (it == 0) Heading.TO_ALGIERS else Heading.TO_SUBURBS) },
-                modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp),
-            )
-            when {
-                s.serverWaking -> WakingCard()
-                s.hero != null -> HeroCard(s, onToggleAlert = { vm.toggleAlert() })
-                !s.loading && s.needsStation -> ChooseStationCard(onAdd = onOpenFavorites)
-                !s.loading -> EmptyHero(s)
-            }
-            s.error?.let {
-                Text(it, style = WrType.small, color = c.danger, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            }
-            s.alertMessage?.let {
-                Text(it, style = WrType.small, color = c.estimatedText, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            }
-            s.nearest?.let { (st, d) ->
-                WrCard(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp)) {
-                    ListRow(divider = false, onClick = { onOpenStation(st.id) }) {
-                        Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.liveSoft), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.GpsFixed, null, tint = c.liveText, modifier = Modifier.size(18.dp))
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(s.switchNotice) {
+        val notice = s.switchNotice ?: return@LaunchedEffect
+        val result = snackbar.showSnackbar(
+            message = notice.message,
+            actionLabel = "تراجع",
+            duration = SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed) vm.undoSwitch() else vm.dismissSwitchNotice()
+    }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().background(c.ground)) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                Header(onOpenNotifications)
+                s.armedBanner?.let { ArmedAlertBanner(it, onCancel = vm::cancelAlert, onShow = vm::showArmedAlert) }
+                FavoritesRow(s, onSelect = vm::selectStation, onAdd = onOpenFavorites)
+                Segmented(
+                    options = listOf("نحو الجزائر", "نحو الضواحي"),
+                    selected = if (s.heading == Heading.TO_ALGIERS) 0 else 1,
+                    onSelect = { vm.setHeading(if (it == 0) Heading.TO_ALGIERS else Heading.TO_SUBURBS) },
+                    modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp),
+                )
+                when {
+                    s.serverWaking -> WakingCard()
+                    s.hero != null -> HeroCard(s, onToggleAlert = { vm.toggleAlert() })
+                    !s.loading && s.needsStation -> ChooseStationCard(onAdd = onOpenFavorites)
+                    !s.loading -> EmptyHero(s)
+                }
+                s.error?.let {
+                    Text(it, style = WrType.small, color = c.danger, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                }
+                s.alertMessage?.let {
+                    Text(it, style = WrType.small, color = c.estimatedText, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                }
+                s.nearest?.let { (st, d) ->
+                    WrCard(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp)) {
+                        ListRow(divider = false, onClick = { onOpenStation(st.id) }) {
+                            Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.liveSoft), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.GpsFixed, null, tint = c.liveText, modifier = Modifier.size(18.dp))
+                            }
+                            Text("أقرب محطة إليك: ${st.nameAr} · ${walk(d)}", style = WrType.body.copy(fontSize = 14.sp), color = c.ink, modifier = Modifier.weight(1f))
+                            Chevron()
                         }
-                        Text("أقرب محطة إليك: ${st.nameAr} · ${walk(d)}", style = WrType.body.copy(fontSize = 14.sp), color = c.ink, modifier = Modifier.weight(1f))
-                        Chevron()
                     }
                 }
-            }
-            if (s.next.isNotEmpty()) {
-                SectionHeader("بعده", Modifier.padding(start = 20.dp, end = 12.dp, top = 12.dp), action = "كل القطارات",
-                    onAction = { s.station?.let { onOpenStation(it.id) } })
-                WrCard(Modifier.padding(horizontal = 20.dp)) {
-                    s.next.forEachIndexed { i, r -> TrainLine(r, divider = i < s.next.lastIndex) }
+                if (s.next.isNotEmpty()) {
+                    SectionHeader("بعده", Modifier.padding(start = 20.dp, end = 12.dp, top = 12.dp), action = "كل القطارات",
+                        onAction = { s.station?.let { onOpenStation(it.id) } })
+                    WrCard(Modifier.padding(horizontal = 20.dp)) {
+                        s.next.forEachIndexed { i, r -> TrainLine(r, divider = i < s.next.lastIndex) }
+                    }
                 }
+                Spacer(Modifier.height(16.dp))
             }
-            Spacer(Modifier.height(16.dp))
+            PrimaryButton(
+                "أنا في القطار", onClick = onBoard,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                leading = { Icon(TrainGlyph, null, tint = c.onSignal, modifier = Modifier.size(22.dp)) },
+            )
         }
-        PrimaryButton(
-            "أنا في القطار", onClick = onBoard,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-            leading = { Icon(TrainGlyph, null, tint = c.onSignal, modifier = Modifier.size(22.dp)) },
+        SnackbarHost(
+            snackbar,
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp),
         )
     }
 }
@@ -143,6 +165,45 @@ private fun Header(onOpenNotifications: () -> Unit) {
                 .semantics { contentDescription = "الإشعارات" },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.Notifications, null, tint = c.ink, modifier = Modifier.size(22.dp)) }
+    }
+}
+
+@Composable
+private fun ArmedAlertBanner(b: ArmedBanner, onCancel: () -> Unit, onShow: () -> Unit) {
+    val c = Wr.colors
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(16.dp)).background(if (b.followsCurrentView) c.liveSoft else c.card)
+            .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.NotificationsActive, null,
+            tint = if (b.followsCurrentView) c.liveText else c.inkMuted,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            HomeAlertPolicy.bannerText(b),
+            style = WrType.small.copy(fontSize = 12.sp),
+            color = c.ink,
+            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+        )
+        if (!b.followsCurrentView) {
+            Text(
+                "عرض", style = WrType.bodyStrong.copy(fontSize = 13.sp), color = c.liveText,
+                modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                    .clickable(role = Role.Button, onClick = onShow)
+                    .semantics { contentDescription = "عرض التنبيه المفعّل" }
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+            )
+        }
+        Text(
+            "إلغاء", style = WrType.bodyStrong.copy(fontSize = 13.sp), color = c.danger,
+            modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button, onClick = onCancel)
+                .semantics { contentDescription = "إلغاء التنبيه" }
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+        )
     }
 }
 
